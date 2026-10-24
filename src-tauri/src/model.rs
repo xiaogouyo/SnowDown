@@ -102,6 +102,7 @@ pub struct AppSnapshot {
     pub settings: Settings,
     pub media_ready: bool,
     pub authenticated: bool,
+    pub auth: crate::auth::AuthStatus,
     pub version: String,
 }
 

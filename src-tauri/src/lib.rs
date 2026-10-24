@@ -1,3 +1,4 @@
+mod auth;
 mod bilibili;
 mod engine;
 mod model;
@@ -22,7 +23,7 @@ use tauri::{
 pub struct AppState {
     tasks: Mutex<Vec<DownloadTask>>,
     settings: Mutex<Settings>,
-    cookie: Mutex<String>,
+    auth: auth::Auth,
     active: Mutex<HashMap<String, Arc<AtomicBool>>>,
     storage: Storage,
     ffmpeg: Option<PathBuf>,
@@ -32,11 +33,16 @@ impl AppState {
     fn snapshot(&self) -> AppSnapshot {
         let mut tasks = self.tasks.lock().unwrap().clone();
         tasks.sort_by_key(|t| std::cmp::Reverse(t.created_at));
+        let auth = self.auth.snapshot();
         AppSnapshot {
             tasks,
             settings: self.settings.lock().unwrap().clone(),
             media_ready: self.ffmpeg.is_some(),
-            authenticated: !self.cookie.lock().unwrap().is_empty(),
+            authenticated: matches!(
+                auth.state.as_str(),
+                "checking" | "authenticated" | "offline"
+            ),
+            auth,
             version: env!("CARGO_PKG_VERSION").into(),
         }
     }
@@ -70,7 +76,7 @@ async fn inspect_video(
     input: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<VideoInfo, String> {
-    let cookie = state.cookie.lock().unwrap().clone();
+    let cookie = state.auth.cookie();
     bilibili::inspect(&input, &cookie).await
 }
 
@@ -242,38 +248,38 @@ fn save_settings(
 }
 
 #[tauri::command]
-fn set_session(
+async fn begin_login(state: State<'_, Arc<AppState>>) -> Result<auth::LoginQr, String> {
+    state.auth.begin().await
+}
+
+#[tauri::command]
+async fn poll_login(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
-    cookie: String,
-) -> Result<(), String> {
-    let cookie = cookie.trim();
-    if cookie.chars().any(|c| c.is_control()) || cookie.len() > 16000 {
-        return Err("登录凭据包含无效字符。".into());
+    id: String,
+) -> Result<auth::LoginPoll, String> {
+    let result = state.auth.poll(&id).await?;
+    if result.state == "confirmed" {
+        state.emit(&app);
     }
-    let cleaned = if cookie.is_empty() {
-        String::new()
-    } else if !cookie.contains('=') {
-        format!("SESSDATA={cookie}")
-    } else {
-        cookie
-            .split(';')
-            .map(str::trim)
-            .filter(|part| {
-                part.split_once('=').is_some_and(|(key, _)| {
-                    matches!(
-                        key,
-                        "SESSDATA" | "bili_jct" | "DedeUserID" | "buvid3" | "buvid4"
-                    )
-                })
-            })
-            .collect::<Vec<_>>()
-            .join("; ")
-    };
-    if !cookie.is_empty() && !cleaned.starts_with("SESSDATA=") && !cleaned.contains("; SESSDATA=") {
-        return Err("没有找到 SESSDATA，请粘贴其值或包含它的B站 Cookie。".into());
-    }
-    *state.cookie.lock().unwrap() = cleaned;
+    Ok(result)
+}
+
+#[tauri::command]
+fn cancel_login(state: State<'_, Arc<AppState>>) {
+    state.auth.cancel();
+}
+
+#[tauri::command]
+fn logout(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    state.auth.logout()?;
+    state.emit(&app);
+    Ok(())
+}
+
+#[tauri::command]
+async fn check_login(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    state.auth.validate().await;
     state.emit(&app);
     Ok(())
 }
@@ -346,7 +352,7 @@ pub fn run() {
             let state = Arc::new(AppState {
                 tasks: Mutex::new(tasks),
                 settings: Mutex::new(settings),
-                cookie: Mutex::new(String::new()),
+                auth: auth::Auth::open(data_dir.join("bilibili-session.dat")),
                 active: Mutex::new(HashMap::new()),
                 storage,
                 ffmpeg: find_ffmpeg(&handle),
@@ -383,6 +389,12 @@ pub fn run() {
                 tray = tray.icon(icon.clone());
             }
             tray.build(app)?;
+            let auth_handle = handle.clone();
+            let auth_state = state.clone();
+            tauri::async_runtime::spawn(async move {
+                auth_state.auth.validate().await;
+                auth_state.emit(&auth_handle);
+            });
             engine::start_scheduler(handle, state);
             Ok(())
         })
@@ -398,7 +410,11 @@ pub fn run() {
             create_tasks,
             task_action,
             save_settings,
-            set_session,
+            begin_login,
+            poll_login,
+            cancel_login,
+            logout,
+            check_login,
             open_download_directory
         ])
         .run(tauri::generate_context!())

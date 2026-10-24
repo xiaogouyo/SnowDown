@@ -10,3 +10,29 @@
 @media(max-width:1050px){.sidebar{width:194px;padding-left:12px;padding-right:12px}.brand{font-size:20px;gap:9px}.workspace{padding:27px}.topbar{padding:0 27px}.link-card{padding:17px}.link-card-footer{gap:13px}.link-card-footer .shortcut-tip{display:none}.list-tools{gap:13px}.task-cover{width:90px;height:60px}.task-row{gap:11px;padding:17px 14px}.task-actions{gap:0}.new-task kbd{display:none}.sidebar-collection{padding-left:15px}.profile-text small{font-size:7px}.toast-message{left:calc(50% + 90px)}}
 .nav-item{font-size:13px}.workspace-label{font-size:11px}.profile-text strong{font-size:12px}.profile-text small{font-size:9px}.breadcrumb{font-size:12px}.platform-badge{font-size:11px}.page-heading p{font-size:12px}.button{font-size:12px}.link-card-label{font-size:11px}.link-form input{font-size:12px}.paste-button{font-size:11px}.link-card-footer{font-size:10px}.section-title h2{font-size:14px}.text-button,.filter-select select{font-size:11px}.checkbox-label,.bulk-actions button{font-size:11px}.table-right-label{font-size:10px}.empty-state{min-height:260px}.empty-state h3{font-size:14px}.empty-state p{font-size:11px}.empty-button{font-size:11px}.table-footer{font-size:10px}.table-footer .text-button{font-size:10px}.workspace-note strong{font-size:11px}.workspace-note p{font-size:10px}.statusbar{font-size:10px}.task-title-line h3{font-size:12px}.task-meta{font-size:10px}.task-detail{font-size:10px}.status-tag{font-size:9px}.format-option strong{font-size:12px}.format-option small{font-size:10px}.quality-hint{font-size:10px}.page-option .part-title{font-size:11px}.field-label{font-size:11px}.folder-field input,.settings-two-col input,.settings-two-col select{font-size:11px}.toggle-row>span>span{font-size:11px}.toggle-row small{font-size:9px}.account-content>p{font-size:11px}.modal-footer>span{font-size:10px}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+/* Integrated desktop chrome and official account login. */
+.topbar { padding-right: 0; user-select: none; }
+.topbar-right { gap: 18px; height: 100%; }
+.breadcrumb, .breadcrumb * { pointer-events: none; }
+.window-controls { height: 100%; display: flex; align-items: stretch; margin-left: 6px; border-left: 1px solid var(--line); }
+.window-controls button { display: flex; align-items: center; justify-content: center; width: 44px; background: transparent; color: #6f7e93; transition: background .15s, color .15s; }
+.window-controls button:hover { background: #eaf1fc; color: #3377ed; }
+.window-controls .window-close:hover { background: #e75260; color: white; }
+.avatar img, .account-avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.profile-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-content { text-align: center; }
+.account-content .account-illustration { margin-left: auto; margin-right: auto; }
+.account-content .account-avatar { width: 64px; height: 64px; overflow: hidden; padding: 0; }
+.account-content > p { max-width: 365px; margin-left: auto; margin-right: auto; }
+.login-qr { width: 202px; height: 202px; padding: 10px; border: 1px solid #e4ebf5; border-radius: 14px; margin: 20px auto 12px; display: flex; align-items: center; justify-content: center; color: #b6cce8; position: relative; background: white; }
+.login-qr > img { width: 180px; height: 180px; image-rendering: pixelated; }
+.login-qr .faded { opacity: .12; filter: blur(2px); }
+.qr-expired { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; border-radius: inherit; background: #ffffff70; }
+.account-content .qr-status { font-size: 12px; color: #61748f; min-height: 20px; margin-top: 12px; }
+.login-start { margin: 4px auto 8px; }
+.login-saved { display: inline-flex; align-items: center; gap: 6px; color: #519f82; background: #edf8f3; padding: 6px 10px; border-radius: 6px; font-size: 11px; }
+.login-privacy { display: flex; align-items: flex-start; gap: 9px; text-align: left; background: #f5f8fd; border: 1px solid #e9eff7; padding: 13px 15px; border-radius: 9px; margin-top: 23px; font-size: 10px; color: #8b9bb0; line-height: 1.7; }
+.login-privacy svg { margin-top: 1px; color: #81a7cf; }
+.account-content .account-buttons { justify-content: center; }
+.login-back { margin: 10px auto 0; }
+@media (max-height: 760px) { .account-content { padding-top: 18px; padding-bottom: 18px; } .account-content .account-illustration { display: none; } .login-qr { margin-top: 14px; } .login-privacy { margin-top: 16px; } }

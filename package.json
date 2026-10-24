@@ -1,7 +1,7 @@
 {
   "name": "snowdown",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -9,7 +9,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "node scripts/desktop.mjs",
     "desktop:dev": "node scripts/desktop.mjs dev",
-    "desktop:build": "node scripts/desktop.mjs build",
+    "desktop:build": "node scripts/build-windows.mjs",
+    "installer:build": "node scripts/build-installer.mjs",
     "test": "vitest run",
     "setup:media": "node scripts/setup-media.mjs"
   },

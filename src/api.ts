@@ -1,7 +1,8 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
-import type { AppSnapshot, CreateTaskRequest, Settings, VideoInfo } from './types'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import type { AppSnapshot, CreateTaskRequest, Settings, VideoInfo, LoginQr, LoginPoll } from './types'
 
 export const desktop = isTauri()
 
@@ -9,7 +10,7 @@ export async function getSnapshot(): Promise<AppSnapshot> {
   if (!desktop) return {
     tasks: [],
     settings: { downloadDir: '', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false },
-    mediaReady: false, authenticated: false, version: '0.1.0',
+    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.1',
   }
   return invoke('get_snapshot')
 }
@@ -38,9 +39,25 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await invoke('save_settings', { settings })
 }
 
-export async function setSession(cookie: string): Promise<void> {
+export async function beginLogin(): Promise<LoginQr> { requireDesktop(); return invoke('begin_login') }
+export async function pollLogin(id: string): Promise<LoginPoll> { requireDesktop(); return invoke('poll_login', { id }) }
+export async function cancelLogin(): Promise<void> { if (desktop) await invoke('cancel_login') }
+export async function logout(): Promise<void> { requireDesktop(); await invoke('logout') }
+export async function checkLogin(): Promise<void> { requireDesktop(); await invoke('check_login') }
+
+export async function windowAction(action: 'minimize' | 'maximize' | 'close'): Promise<void> {
   requireDesktop()
-  await invoke('set_session', { cookie })
+  const window = getCurrentWindow()
+  if (action === 'maximize') await window.toggleMaximize()
+  else if (action === 'minimize') await window.minimize()
+  else await window.close()
+}
+
+export async function watchMaximized(callback: (maximized: boolean) => void): Promise<() => void> {
+  if (!desktop) return () => {}
+  const window = getCurrentWindow()
+  callback(await window.isMaximized())
+  return window.onResized(async () => callback(await window.isMaximized()))
 }
 
 export async function chooseDirectory(): Promise<string | null> {

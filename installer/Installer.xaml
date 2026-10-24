@@ -1,0 +1,102 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="SnowDown 安装" Width="1000" Height="660" WindowStartupLocation="CenterScreen"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ResizeMode="NoResize" FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="13"
+        Foreground="#263C5A" UseLayoutRounding="True">
+  <Window.Resources>
+    <Style TargetType="CheckBox">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox">
+        <StackPanel Orientation="Horizontal">
+          <Border x:Name="Box" Width="16" Height="16" CornerRadius="4" BorderThickness="1" BorderBrush="#C8DBF6" Background="#F4F8FF" Margin="0,0,8,0">
+            <Path x:Name="Tick" Data="M 2,7 L 5,10 L 11,3" Stroke="White" StrokeThickness="1.6" VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="Collapsed"/>
+          </Border>
+          <ContentPresenter VerticalAlignment="Center"/>
+        </StackPanel>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsChecked" Value="True"><Setter TargetName="Box" Property="Background" Value="#5D9BF6"/><Setter TargetName="Box" Property="BorderBrush" Value="#5D9BF6"/><Setter TargetName="Tick" Property="Visibility" Value="Visible"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="#244F8D"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.6"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="QuietButton" TargetType="Button">
+      <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="#7E96B6"/>
+      <Setter Property="Cursor" Value="Hand"/><Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Border x:Name="Surface" Background="{TemplateBinding Background}" CornerRadius="8" Padding="8">
+          <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="#EAF2FF"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="Background" Value="#DDEAFF"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="PrimaryButton" TargetType="Button">
+      <Setter Property="Cursor" Value="Hand"/><Setter Property="Foreground" Value="White"/>
+      <Setter Property="FontSize" Value="20"/><Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Border x:Name="Surface" CornerRadius="17">
+          <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#68B0FF" Offset="0"/><GradientStop Color="#397EF2" Offset="1"/></LinearGradientBrush></Border.Background>
+          <Border.Effect><DropShadowEffect Color="#6F9BD8" Opacity="0.18" BlurRadius="18" ShadowDepth="5"/></Border.Effect>
+          <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.9"/></Trigger>
+          <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.75"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Surface" Property="Opacity" Value="0.6"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderBrush" Value="#163E88"/><Setter TargetName="Surface" Property="BorderThickness" Value="2"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+  </Window.Resources>
+  <Viewbox x:Name="ScaleRoot" Stretch="Uniform">
+    <Canvas x:Name="Design" Width="1000" Height="660" Background="{x:Null}">
+      <Path Data="M 54,266 C 80,179 184,172 260,115 C 337,56 397,58 467,99 C 535,145 586,111 652,110 L 930,91 Q 968,91 968,132 L 968,582 Q 968,624 926,624 L 139,622 Q 65,620 54,547 Z" Fill="#DBEBFF" Stroke="#F3F9FF" StrokeThickness="2"/>
+      <Path Data="M 416,132 C 515,106 730,104 926,91 Q 968,89 968,132 L 968,582 Q 968,624 926,624 L 494,624 C 423,600 400,558 411,487 C 443,407 407,361 402,288 C 400,220 390,173 416,132 Z" Stroke="#EEF6FF" StrokeThickness="1.5">
+        <Path.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="0.8,1"><GradientStop Color="White" Offset="0"/><GradientStop Color="#FAFCFF" Offset="1"/></LinearGradientBrush></Path.Fill>
+        <Path.Effect><DropShadowEffect Color="#6E9CD4" Opacity="0.16" BlurRadius="22" ShadowDepth="6"/></Path.Effect>
+      </Path>
+      <Image x:Name="Character" Width="1000" Height="666.667" Canvas.Left="0" Canvas.Top="-6" Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality"/>
+      <Button x:Name="Minimize" Canvas.Left="876" Canvas.Top="104" Width="34" Height="32" Style="{StaticResource QuietButton}" ToolTip="最小化" AutomationProperties.Name="最小化安装器">
+        <Path Data="M 0,6 L 12,6" Stroke="#7E96B6" StrokeThickness="1.6"/>
+      </Button>
+      <Button x:Name="Close" Canvas.Left="921" Canvas.Top="104" Width="34" Height="32" Style="{StaticResource QuietButton}" ToolTip="关闭" AutomationProperties.Name="关闭安装器">
+        <Path Data="M 1,1 L 12,12 M 12,1 L 1,12" Stroke="#7E96B6" StrokeThickness="1.6"/>
+      </Button>
+      <Viewbox Canvas.Left="555" Canvas.Top="195" Width="55" Height="55">
+        <Path Data="M 12,1 L 12,23 M 2.5,6.5 L 21.5,17.5 M 2.5,17.5 L 21.5,6.5 M 8,3 L 12,7 L 16,3 M 8,21 L 12,17 L 16,21 M 3,11 L 8,10 L 7,5 M 21,13 L 16,14 L 17,19 M 3,13 L 8,14 L 7,19 M 21,11 L 16,10 L 17,5" Stroke="#88B9F6" StrokeThickness="1.25" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+      </Viewbox>
+      <TextBlock Canvas.Left="630" Canvas.Top="187" FontFamily="Segoe UI" FontSize="44" FontWeight="Bold" Foreground="#254366">SnowDown<TextBlock Foreground="#7CAEF2">.</TextBlock></TextBlock>
+      <TextBlock Canvas.Left="635" Canvas.Top="250" FontSize="19" Foreground="#8099BC" Text="好内容，慢慢收藏。"/>
+      <TextBlock Canvas.Left="635" Canvas.Top="296" FontSize="13" Foreground="#96AAC4" Text="B站视频 · 音频 · 字幕 · 弹幕"/>
+
+      <Grid x:Name="ReadyPanel" Canvas.Left="566" Canvas.Top="358" Width="370" Height="85">
+        <Grid.RowDefinitions><RowDefinition Height="24"/><RowDefinition Height="42"/><RowDefinition Height="19"/></Grid.RowDefinitions>
+        <TextBlock Text="安装位置" Foreground="#839ABB" FontSize="12"/>
+        <Border Grid.Row="1" BorderBrush="#DCE9FC" BorderThickness="1" CornerRadius="12" Background="#F5F9FF">
+          <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="64"/></Grid.ColumnDefinitions>
+            <TextBox x:Name="InstallPath" Margin="13,6,4,6" Padding="0,4" BorderThickness="0" Background="Transparent" FontFamily="Segoe UI" Foreground="#375377" FontSize="13" VerticalContentAlignment="Center" AutomationProperties.Name="安装位置"/>
+            <Button x:Name="Browse" Grid.Column="1" Content="更改" Style="{StaticResource QuietButton}" Foreground="#4487F4" Margin="2" AutomationProperties.Name="更改安装位置"/>
+          </Grid>
+        </Border>
+      </Grid>
+      <StackPanel x:Name="ProgressPanel" Canvas.Left="566" Canvas.Top="359" Width="370" Visibility="Collapsed">
+        <TextBlock x:Name="ProgressTitle" Text="正在安装" FontSize="18" FontWeight="SemiBold" Foreground="#3E6089"/>
+        <TextBlock x:Name="ProgressDetail" Text="正在准备安装文件…" Margin="0,10,0,12" Foreground="#8BA0BD" FontSize="12" TextWrapping="Wrap"/>
+        <ProgressBar x:Name="Progress" Height="5" IsIndeterminate="True" BorderThickness="0" Background="#E9F1FD" Foreground="#6CA7F8"/>
+      </StackPanel>
+      <Button x:Name="Install" Canvas.Left="566" Canvas.Top="449" Width="370" Height="60" Style="{StaticResource PrimaryButton}">
+        <StackPanel Orientation="Horizontal"><Path x:Name="DownloadIcon" Data="M 11,0 V 19 M 3,11 L 11,20 L 19,11 M 0,26 H 22" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Margin="0,0,17,0" VerticalAlignment="Center"/><TextBlock x:Name="ActionText" Text="立即安装"/></StackPanel>
+      </Button>
+      <CheckBox x:Name="LaunchAfter" Canvas.Left="666" Canvas.Top="533" Foreground="#7E98BA" FontSize="12" IsChecked="True" Content="安装完成后启动"/>
+      <TextBlock x:Name="Status" Canvas.Left="566" Canvas.Top="569" Width="370" TextAlignment="Center" FontSize="11" Foreground="#8FA4BF" TextWrapping="Wrap"/>
+      <TextBlock x:Name="Version" Canvas.Left="644" Canvas.Top="600" Foreground="#A3B8D4" FontSize="10"/>
+      <Path Canvas.Left="923" Canvas.Top="561" Data="M 12,0 V 24 M 2,6 L 22,18 M 2,18 L 22,6 M 7,2 L 12,7 L 17,2 M 7,22 L 12,17 L 17,22" Stroke="#CEE3FF" StrokeThickness="1.7" IsHitTestVisible="False"/>
+    </Canvas>
+  </Viewbox>
+</Window>

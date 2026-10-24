@@ -138,7 +138,7 @@ async fn run_task(
         .ffmpeg
         .as_ref()
         .ok_or("未找到 FFmpeg。请在设置中检查组件，或重新安装完整客户端。")?;
-    let cookie = state.cookie.lock().unwrap().clone();
+    let cookie = state.auth.cookie();
     let api_client = bilibili::client(&cookie)?;
     let media_client = Client::builder()
         .user_agent(bilibili::USER_AGENT)

@@ -54,8 +54,12 @@ export interface AppSnapshot {
   settings: Settings
   mediaReady: boolean
   authenticated: boolean
+  auth: { state: 'loggedout' | 'checking' | 'authenticated' | 'expired' | 'offline'; account: { uid: number; name: string; avatar: string } | null; message: string | null }
   version: string
 }
+
+export interface LoginQr { id: string; image: string; expiresAt: number }
+export interface LoginPoll { state: 'waiting' | 'scanned' | 'expired' | 'confirmed' }
 
 export interface CreateTaskRequest {
   video: VideoInfo
