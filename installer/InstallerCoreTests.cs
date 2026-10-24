@@ -17,10 +17,20 @@ namespace SnowDown.Setup
             try { InstallerCore.NormalizePath(path); throw new Exception("Accepted invalid path: " + path); }
             catch (ArgumentException) { assertions++; }
         }
-        private static int Main()
+        private static int Main(string[] args)
         {
+            if (args.Length == 1 && args[0] == "--wait-fixture") { System.Threading.Thread.Sleep(300); return 0; }
             Check(InstallerCore.NormalizePath(@"D:\应用 文件\SnowDown\") == @"D:\应用 文件\SnowDown", "Unicode path");
             Check(InstallerCore.BackendArguments(@"D:\应用 文件\SnowDown") == @"/S /D=D:\应用 文件\SnowDown", "NSIS last unquoted directory");
+            Check(InstallerCore.UpdateDirectory(new[] { @"--update-dir=D:\应用 文件\SnowDown", "--wait-pid=123" }) == @"D:\应用 文件\SnowDown", "updater keeps current Unicode directory");
+            Check(InstallerCore.UpdateDirectory(new string[0]) == null, "normal installer uses default directory");
+            try { InstallerCore.UpdateDirectory(new[] { "--update-dir=relative" }); throw new Exception("Accepted relative update directory"); } catch (ArgumentException) { assertions++; }
+            try { InstallerCore.WaitForUpdatingClient(new[] { "--wait-pid=invalid" }); throw new Exception("Accepted invalid parent id"); } catch (ArgumentException) { assertions++; }
+            using (System.Diagnostics.Process fixture = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(System.Reflection.Assembly.GetExecutingAssembly().Location, "--wait-fixture") { UseShellExecute = false, CreateNoWindow = true }))
+            {
+                InstallerCore.WaitForUpdatingClient(new[] { "--wait-pid=" + fixture.Id });
+                Check(fixture.HasExited, "updater waits for parent to exit without terminating it");
+            }
             Reject(@"D:\"); Reject(@"D:relative"); Reject("relative"); Reject(@"\\server\share\SnowDown");
             Reject("D:\\Apps\\SnowDown\" /R"); Reject("D:\\Apps\\SnowDown\n/R");
             using (MemoryStream bytes = new MemoryStream(Encoding.UTF8.GetBytes("abc")))

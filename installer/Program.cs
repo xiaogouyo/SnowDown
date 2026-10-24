@@ -39,6 +39,8 @@ namespace SnowDown.Setup
                 }
                 foreach (string argument in args)
                     if (argument == "/S") return SilentInstall(args);
+                string updateDirectory = InstallerCore.UpdateDirectory(args);
+                InstallerCore.WaitForUpdatingClient(args);
                 using (Mutex mutex = new Mutex(false, @"Local\SnowDown-Setup-CurrentUser"))
                 {
                     bool owns = false;
@@ -47,7 +49,7 @@ namespace SnowDown.Setup
                         try { owns = mutex.WaitOne(0); } catch (AbandonedMutexException) { owns = true; }
                         if (!owns) return 0;
                         Application application = new Application();
-                        SetupWindow setup = new SetupWindow(false);
+                        SetupWindow setup = new SetupWindow(false, updateDirectory);
                         return application.Run(setup.Window);
                     }
                     finally { if (owns) mutex.ReleaseMutex(); }
@@ -56,7 +58,7 @@ namespace SnowDown.Setup
             catch (Exception error)
             {
                 // No command line or credentials are written to logs.
-                if (args.Length == 0) MessageBox.Show("安装器无法启动：" + error.Message, "SnowDown", MessageBoxButton.OK, MessageBoxImage.Information);
+                if (args.Length == 0 || Array.Exists(args, argument => argument.StartsWith("--update-dir=", StringComparison.Ordinal))) MessageBox.Show("安装器无法启动：" + error.Message, "SnowDown", MessageBoxButton.OK, MessageBoxImage.Information);
                 return 1;
             }
         }
@@ -109,7 +111,7 @@ namespace SnowDown.Setup
         private bool complete;
         private string installedDirectory;
 
-        internal SetupWindow(bool preview)
+        internal SetupWindow(bool preview, string updateDirectory = null)
         {
             this.preview = preview;
             using (Stream source = Assembly.GetExecutingAssembly().GetManifestResourceStream("SnowDown.Layout"))
@@ -133,7 +135,7 @@ namespace SnowDown.Setup
             progressPanel = (StackPanel)Window.FindName("ProgressPanel");
             progress = (ProgressBar)Window.FindName("Progress");
             launch = (CheckBox)Window.FindName("LaunchAfter");
-            installPath.Text = preview ? @"D:\Apps\SnowDown" : InstallerCore.DefaultDirectory();
+            installPath.Text = preview ? @"D:\Apps\SnowDown" : updateDirectory ?? InstallerCore.DefaultDirectory();
             ((TextBlock)Window.FindName("Version")).Text = "v" + BuildInfo.Version + " · Windows x64";
             using (Stream icon = Assembly.GetExecutingAssembly().GetManifestResourceStream("SnowDown.Icon"))
                 Window.Icon = BitmapFrame.Create(icon, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);

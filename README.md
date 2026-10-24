@@ -2,11 +2,11 @@
 
 Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红书视频。采用 Tauri 2、Vue 3、TypeScript 与 Rust，下载文件在本机处理和保存。
 
-## 下载 v0.1.5
+## 下载 v0.1.6
 
-- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.5/SnowDown_0.1.5_x64-setup.exe)
-- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.5/SnowDown_0.1.5_Windows_x64_portable.zip)
-- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.1.5)
+- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.6/SnowDown_0.1.6_x64-setup.exe)
+- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.6/SnowDown_0.1.6_Windows_x64_portable.zip)
+- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.1.6)
 
 需要 Windows 10/11 x64 和 WebView2 运行时。免安装版请完整解压后启动，保留 `resources` 文件夹。下载文件的 SHA256 校验值随 Release 提供。
 
@@ -23,6 +23,7 @@ Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红�
 - SQLite 保存设置与任务；退出后再次打开，可手动继续中断任务。
 - 可选保存封面、XML弹幕、SRT字幕；附加资源不可用不影响已下载的视频。
 - 系统托盘、单实例、打开下载目录与定位文件。
+- GitHub 新版本提醒：启动后和每 6 小时检查正式版，发现新版时弹窗；右上角版本号可随时手动检查。支持暂不更新（同一版本 24 小时内不再自动提醒）、软件内下载、进度显示、取消/重试和后台下载，校验成功后退出并打开安装器。
 - B站官方二维码登录，在手机B站确认；Windows DPAPI 加密保存会话，重启自动恢复，退出账号清除本机凭据。
 - 三个平台统一在软件内扫码登录；抖音、小红书二维码取自官方登录页，B站使用官方二维码接口。二维码过期自动更新，登录成功后加密保存，已登录时统一提供“退出账号”“检查登录”。抖音支持分离音视频流合并。
 - 状态、画质、并发数统一使用软件内的下拉菜单；长链接不会挤压操作按钮，设置操作区保持可见。
@@ -36,6 +37,10 @@ Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红�
 安装 `release/` 中的 Windows 安装程序，启动 SnowDown，粘贴视频链接并点击“解析视频”，选择分P与格式后下载。
 
 也可解压免安装压缩包，双击文件夹中的 `SnowDown.exe`；请保留旁边的 `resources` 文件夹。
+
+检查更新：点击右上角版本号，或打开“关于 → 检查更新”，查看当前版本、更新说明并检查新版。更新信息来自本项目的公开 GitHub Release，无需 GitHub 登录。自动检查失败时保持安静，手动检查会显示错误。选择“暂不更新”后，同一版本 24 小时内不再自动弹窗，手动检查仍可用；正在操作其他弹窗时，新版本提示会等待其关闭。
+
+下载更新：点击“下载更新”，可取消、重试或在后台下载。下载完成并核对 GitHub 提供的 SHA256 与文件大小后，可“退出并打开安装器”；有排队、下载或合并任务时，需先暂停或完成。安装器等待当前进程退出，预填当前软件目录，用户确认后继续安装，任务、设置与账号数据沿用。免安装版用户若要继续保持免安装方式，可在 GitHub 下载 ZIP，退出程序后解压覆盖原文件夹。v0.1.5 及更早版本尚无此更新入口，需先手动升级一次。
 
 批量下载：点击右上角“批量下载”（Ctrl+N），粘贴多个视频链接或分享文字，统一设置后点击“一键下载”。成功项会加入队列，失败项保留在弹窗中。画质上限优先选择实际可用的较低画质，无较低档时选最低可用画质；竖屏按短边分辨率比较。默认只下载链接指定的分P，可勾选下载全部分P。间隔从同批上一个任务实际启动时计算，并遵守全局并发数；0 秒表示不额外等待。间隔随任务保存，重启后仍需手动继续中断任务。
 

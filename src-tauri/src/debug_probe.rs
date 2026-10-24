@@ -50,6 +50,10 @@ async fn readable(client: &reqwest::Client, url: &str) -> bool {
 }
 
 pub fn start(app: AppHandle) {
+    if std::env::var_os("SNOWDOWN_UPDATE_LAYOUT").is_some() {
+        verify_update_ui(app);
+        return;
+    }
     if std::env::var_os("SNOWDOWN_QR_VERIFY").is_some() {
         verify_qr(app);
         return;
@@ -117,6 +121,65 @@ pub fn start(app: AppHandle) {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../.tools/v013-parse-verification.json");
         let _ = tokio::fs::write(path, serde_json::to_vec(&result).unwrap()).await;
+    });
+}
+
+fn verify_update_ui(app: AppHandle) {
+    use crate::batch_probe::evaluate;
+    use serde_json::json;
+    use tauri::Emitter;
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        for _ in 0..30 {
+            if evaluate(&app, "!!document.querySelector('.version-button')").await
+                == Some(json!(true))
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        let _ = evaluate(
+            &app,
+            "document.querySelector('.version-button').click();true",
+        )
+        .await;
+        let mut checked = false;
+        for _ in 0..60 {
+            if evaluate(&app, "document.querySelector('.update-modal')?.textContent.includes('当前已是最新正式版本')??false").await == Some(json!(true)) { checked = true; break }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        // UI-only future-release fixture; native updater retains the real trusted release data.
+        let mut fixture =
+            serde_json::to_value(app.state::<Arc<AppState>>().updater.status()).unwrap();
+        fixture["release"] = json!({"version":"0.1.7","title":"界面验证样例","notes":"界面验证样例：更新说明。\n".repeat(150),"publishedAt":"2026-10-24T00:00:00Z","url":"https://github.com/xiaogouyo/SnowDown/releases","fileName":"SnowDown_0.1.7_x64-setup.exe","size":1024});
+        fixture["total"] = 1024.into();
+        let _ = app.emit("snowdown://update", fixture);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let mut layouts = vec![];
+        if let Some(window) = app.get_webview_window("main") {
+            for (width, height) in [(1180., 820.), (960., 660.)] {
+                let _ = window.set_size(tauri::LogicalSize::new(width, height));
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                let layout = evaluate(&app, r#"JSON.stringify((()=>{const m=document.querySelector('.update-modal'),v=document.querySelector('.version-button'),f=m?.querySelector('.modal-footer');if(!m||!f||!v)return {valid:false};const r=m.getBoundingClientRect(),b=f.getBoundingClientRect(),s=v.getBoundingClientRect();return {valid:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&b.bottom<=r.bottom+1&&m.scrollWidth<=m.clientWidth&&s.right<=innerWidth,viewport:[innerWidth,innerHeight],futureVersion:m.textContent.includes('v0.1.7'),downloadButton:!!m.querySelector('.update-download'),laterButton:m.textContent.includes('暂不更新'),notesScroll:m.querySelector('.update-notes p').scrollHeight>m.querySelector('.update-notes p').clientHeight,footerVisible:b.height>0}})())"#).await.unwrap_or_default();
+                layouts.push(layout);
+            }
+        }
+        let success = checked
+            && layouts.iter().all(|layout| {
+                layout["valid"] == true
+                    && layout["futureVersion"] == true
+                    && layout["downloadButton"] == true
+                    && layout["laterButton"] == true
+                    && layout["footerVisible"] == true
+            });
+        let report = json!({"success":success,"realManualCheckSucceeded":checked,"futureReleaseIsUiFixture":true,"installerExecuted":false,"layouts":layouts});
+        let _ = tokio::fs::write(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../.tools/v016-update-ui-verification.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .await;
+        app.exit(0);
     });
 }
 

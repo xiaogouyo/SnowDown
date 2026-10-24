@@ -7,12 +7,13 @@ const api = vi.hoisted(() => ({
   desktop: true, getSnapshot: vi.fn(), subscribe: vi.fn(), inspectVideo: vi.fn(),
   createTasks: vi.fn(), createBatch: vi.fn(), taskAction: vi.fn(), saveSettings: vi.fn(), beginLogin: vi.fn(), pollLogin: vi.fn(), cancelLogin: vi.fn(), logout: vi.fn(), checkLogin: vi.fn(), windowAction: vi.fn(), watchMaximized: vi.fn(),
   chooseDirectory: vi.fn(), openDirectory: vi.fn(), readClipboardLink: vi.fn(), watchFocus: vi.fn(),
+  getUpdateStatus: vi.fn(), checkUpdate: vi.fn(), subscribeUpdates: vi.fn(), deferUpdate: vi.fn(), downloadUpdate: vi.fn(), cancelUpdateDownload: vi.fn(), installUpdate: vi.fn(), openUpdateRelease: vi.fn(),
 }))
 vi.mock('../src/api', () => ({ ...api, __v_isRef: false }))
 
 const initial: AppSnapshot = {
   tasks: [], settings: { downloadDir: 'D:\\视频', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
-  siteSessions: [], mediaReady: true, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.5',
+  siteSessions: [], mediaReady: true, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.6',
 }
 const video: VideoInfo = {
   platform: 'bilibili', sourceUrl: 'https://www.bilibili.com/video/BV1xx411c7mD',
@@ -37,11 +38,22 @@ beforeEach(() => {
   api.inspectVideo.mockResolvedValue(video)
   api.createTasks.mockResolvedValue(undefined)
   api.createBatch.mockResolvedValue({ added: 2, skipped: 0 })
+  api.getUpdateStatus.mockResolvedValue({ currentVersion: '0.1.6', release: null, phase: 'idle', downloaded: 0, total: 0, error: null, deferred: false })
+  api.checkUpdate.mockResolvedValue({ currentVersion: '0.1.6', release: null, phase: 'idle', downloaded: 0, total: 0, error: null, deferred: false })
+  api.subscribeUpdates.mockResolvedValue(() => {})
   wrapper = mount(App)
 })
 afterEach(() => { wrapper?.unmount(); vi.useRealTimers() })
 
 describe('desktop download flow', () => {
+  it('offers version checking in the top-right version button', async () => {
+    await flushPromises()
+    await wrapper.get('.topbar [aria-label="版本与检查更新"]').trigger('click'); await flushPromises()
+    expect(document.body.querySelector('.update-modal')?.textContent).toContain('当前已是最新正式版本')
+    expect(api.checkUpdate).toHaveBeenCalledTimes(1)
+    await wrapper.get('.new-task').trigger('click')
+    expect(wrapper.find('.batch-modal').exists()).toBe(false)
+  })
   it('opens batch download with the top button and Ctrl+N while retaining single-link parsing', async () => {
     await flushPromises()
     expect(wrapper.get('.new-task').text()).toContain('批量下载')

@@ -2,7 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import type { AppSnapshot, CreateTaskRequest, CreateBatchRequest, BatchResult, Settings, VideoInfo, LoginQr, LoginPoll, Platform, SourceLink } from './types'
+import type { AppSnapshot, CreateTaskRequest, CreateBatchRequest, BatchResult, Settings, VideoInfo, LoginQr, LoginPoll, Platform, SourceLink, UpdateStatus } from './types'
 
 export const desktop = isTauri()
 
@@ -11,7 +11,7 @@ export async function getSnapshot(): Promise<AppSnapshot> {
     tasks: [],
     settings: { downloadDir: '', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
     siteSessions: [],
-    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.5',
+    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.6',
   }
   return invoke('get_snapshot')
 }
@@ -84,4 +84,16 @@ export async function openDirectory(): Promise<void> {
 export async function subscribe(callback: (snapshot: AppSnapshot) => void): Promise<() => void> {
   if (!desktop) return () => {}
   return listen<AppSnapshot>('snowdown://state', (event) => callback(event.payload))
+}
+
+export async function getUpdateStatus(): Promise<UpdateStatus> { requireDesktop(); return invoke('update_status') }
+export async function checkUpdate(): Promise<UpdateStatus> { requireDesktop(); return invoke('check_update') }
+export async function downloadUpdate(): Promise<UpdateStatus> { requireDesktop(); return invoke('download_update') }
+export async function deferUpdate(): Promise<UpdateStatus> { requireDesktop(); return invoke('defer_update') }
+export async function cancelUpdateDownload(): Promise<void> { requireDesktop(); await invoke('cancel_update_download') }
+export async function installUpdate(): Promise<void> { requireDesktop(); await invoke('install_update') }
+export async function openUpdateRelease(): Promise<void> { requireDesktop(); await invoke('open_update_release') }
+export async function subscribeUpdates(callback: (status: UpdateStatus) => void): Promise<() => void> {
+  if (!desktop) return () => {}
+  return listen<UpdateStatus>('snowdown://update', event => callback(event.payload))
 }

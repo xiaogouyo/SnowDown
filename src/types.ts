@@ -89,3 +89,22 @@ export interface BatchOptions {
 }
 export interface CreateBatchRequest { items: CreateTaskRequest[]; options: BatchOptions }
 export interface BatchResult { added: number; skipped: number }
+
+export interface UpdateRelease {
+  version: string
+  title: string
+  notes: string
+  publishedAt: string
+  url: string
+  fileName: string
+  size: number
+}
+export interface UpdateStatus {
+  currentVersion: string
+  release: UpdateRelease | null
+  phase: 'idle' | 'downloading' | 'ready' | 'installing' | 'error'
+  downloaded: number
+  total: number
+  error: string | null
+  deferred: boolean
+}

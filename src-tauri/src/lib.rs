@@ -12,6 +12,7 @@ mod qr_login;
 mod site_sessions;
 mod sites;
 mod storage;
+mod updater;
 mod web_capture;
 
 use model::*;
@@ -39,6 +40,7 @@ pub struct AppState {
     active: Mutex<HashMap<String, Arc<AtomicBool>>>,
     storage: Storage,
     ffmpeg: Option<PathBuf>,
+    updater: updater::Updater,
 }
 
 impl AppState {
@@ -82,6 +84,97 @@ impl AppState {
 #[tauri::command]
 fn get_snapshot(state: State<'_, Arc<AppState>>) -> AppSnapshot {
     state.snapshot()
+}
+
+#[tauri::command]
+fn update_status(state: State<'_, Arc<AppState>>) -> updater::UpdateStatus {
+    state.updater.status()
+}
+
+#[tauri::command]
+async fn check_update(state: State<'_, Arc<AppState>>) -> Result<updater::UpdateStatus, String> {
+    state.updater.check().await
+}
+
+#[tauri::command]
+fn defer_update(state: State<'_, Arc<AppState>>) -> Result<updater::UpdateStatus, String> {
+    state.updater.defer()
+}
+
+#[tauri::command]
+fn cancel_update_download(state: State<'_, Arc<AppState>>) {
+    state.updater.cancel();
+}
+
+#[tauri::command]
+async fn download_update(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<updater::UpdateStatus, String> {
+    state
+        .updater
+        .download(|status| {
+            let _ = app.emit("snowdown://update", status);
+        })
+        .await
+}
+
+#[tauri::command]
+fn open_update_release(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(updater::releases_url(), None::<&str>)
+        .map_err(|_| "无法打开 GitHub 发布页面。".into())
+}
+
+#[tauri::command]
+async fn install_update(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let _operation = state
+        .updater
+        .operation
+        .try_lock()
+        .map_err(|_| "更新操作正在进行。")?;
+    let installer = match state.updater.verified_installer().await {
+        Ok(path) => path,
+        Err(error) => {
+            let _ = app.emit("snowdown://update", state.updater.status());
+            return Err(error);
+        }
+    };
+    {
+        let tasks = state.tasks.lock().unwrap();
+        if tasks.iter().any(|task| {
+            matches!(
+                task.status,
+                TaskStatus::Queued | TaskStatus::Downloading | TaskStatus::Merging
+            )
+        }) || !state.active.lock().unwrap().is_empty()
+        {
+            return Err("请先暂停或完成下载任务，再退出安装更新。".into());
+        }
+        let current = std::env::current_exe().map_err(|_| "无法确定当前软件目录。")?;
+        let directory = current.parent().ok_or("无法确定当前软件目录。")?;
+        let path_text = directory.to_string_lossy();
+        if directory.parent().is_none()
+            || path_text.starts_with("\\\\")
+            || path_text.encode_utf16().count() > 180
+        {
+            return Err(
+                "当前目录不适合直接覆盖安装，请从 GitHub 下载更新并选择独立的软件文件夹。".into(),
+            );
+        }
+        state.updater.mark_installing();
+        let result = std::process::Command::new(installer)
+            .arg(format!("--update-dir={}", directory.to_string_lossy()))
+            .arg(format!("--wait-pid={}", std::process::id()))
+            .spawn();
+        if result.is_err() {
+            state.updater.install_failed();
+            return Err("无法启动更新安装器，请重新下载或在 GitHub 下载。".into());
+        }
+    }
+    app.exit(0);
+    Ok(())
 }
 
 #[tauri::command]
@@ -357,6 +450,8 @@ pub fn run() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/qr-qa-app-data")
             } else if std::env::var_os("SNOWDOWN_BATCH_VERIFY").is_some() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/batch-qa-app-data")
+            } else if std::env::var_os("SNOWDOWN_UPDATE_LAYOUT").is_some() {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/update-ui-qa-data")
             } else {
                 data_dir
             };
@@ -390,6 +485,7 @@ pub fn run() {
                 active: Mutex::new(HashMap::new()),
                 storage,
                 ffmpeg: find_ffmpeg(&handle),
+                updater: updater::Updater::new(data_dir.join("updates"), env!("CARGO_PKG_VERSION")),
             });
             app.manage(state.clone());
             #[cfg(debug_assertions)]
@@ -448,6 +544,13 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
+            update_status,
+            check_update,
+            defer_update,
+            download_update,
+            cancel_update_download,
+            install_update,
+            open_update_release,
             inspect_video,
             create_tasks,
             create_batch_tasks,

@@ -10,7 +10,7 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 
-async fn evaluate(app: &AppHandle, script: &str) -> Option<Value> {
+pub(crate) async fn evaluate(app: &AppHandle, script: &str) -> Option<Value> {
     let window = app.get_webview_window("main")?;
     let (sender, receiver) = tokio::sync::oneshot::channel();
     let sender = Mutex::new(Some(sender));

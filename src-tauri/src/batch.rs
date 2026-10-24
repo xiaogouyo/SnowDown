@@ -11,6 +11,9 @@ pub fn enqueue(
         return Err("未找到 FFmpeg，暂时不能开始下载。请安装完整客户端。".into());
     }
     let mut tasks = state.tasks.lock().unwrap();
+    if state.updater.installing() {
+        return Err("正在退出安装更新，请完成更新后再添加下载。".into());
+    }
     let batch_id = batched.then(|| uuid::Uuid::new_v4().to_string());
     let (added, skipped) = prepare(requests, &options, &tasks, batch_id, now_ms())?;
     if !added.is_empty() {

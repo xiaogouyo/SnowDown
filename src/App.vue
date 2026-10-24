@@ -2,13 +2,14 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   ArrowDown, ArrowDownToLine, ArrowUpRight, Check, CheckCheck, ChevronDown, CircleAlert,
-  CircleCheck, Clock3, ClipboardPaste, Download, ExternalLink, FileText, Film, FolderOpen,
+  CircleCheck, Clock3, ClipboardPaste, Download, FileText, Film, FolderOpen,
   HardDrive, Info, Link2, LoaderCircle, Music2, Pause, Play, Plus, RotateCcw,
   Search, Settings2, ShieldCheck, SlidersHorizontal, Snowflake, Trash2, UserRound, X, Minus, Square, Copy, QrCode,
 } from '@lucide/vue'
 import * as api from './api'
 import UiSelect from './components/UiSelect.vue'
 import BatchDownload from './components/BatchDownload.vue'
+import UpdateCenter from './components/UpdateCenter.vue'
 import { identifySource, platformLabels, sourceSummary } from './sources'
 import { bytes, duration, errorMessage, statusLabels } from './format'
 import type { AppSnapshot, BatchResult, DownloadTask, OutputFormat, Settings, VideoInfo, LoginQr, Platform, SourceLink } from './types'
@@ -26,6 +27,8 @@ const format = ref<OutputFormat>('video')
 const dialog = ref<'settings' | 'about' | null>(null)
 const batchOpen = ref(false)
 const batchButton = ref<HTMLButtonElement>()
+const updateCenter = ref<InstanceType<typeof UpdateCenter>>()
+const updateOpen = ref(false)
 const settingsTab = ref<'download' | 'account'>('download')
 const settingsDraft = reactive<Settings>({ downloadDir: '', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false })
 const accountPlatform = ref<Platform>('bilibili')
@@ -77,8 +80,9 @@ function notify(text: string, type: 'success' | 'error' | 'info' = 'info') {
 
 function setView(next: typeof view.value) { view.value = next; selectedTasks.value = []; filter.value = 'all'; query.value = '' }
 function focusLink() { setView('active'); linkInput.value?.focus() }
+function openUpdateCenter() { dialog.value = null; updateCenter.value?.open() }
 function openBatch() {
-  if (!snapshot.value || analyzing.value || submitting.value || video.value || dialog.value) return
+  if (!snapshot.value || analyzing.value || submitting.value || video.value || dialog.value || updateOpen.value) return
   batchOpen.value = true
 }
 async function closeBatch() { batchOpen.value = false; await nextTick(); batchButton.value?.focus() }
@@ -88,7 +92,7 @@ function batchQueued(result: BatchResult) {
 }
 
 async function analyze() {
-  if (analyzing.value) return
+  if (analyzing.value || updateOpen.value) return
   if (!link.value.trim()) { focusLink(); notify('先粘贴一个B站、抖音或小红书视频链接。'); return }
   const source = identifySource(link.value)
   if (!source) { notify('没有识别到支持的视频链接，可粘贴平台的完整分享内容。', 'error'); return }
@@ -120,11 +124,11 @@ function onPaste(event: ClipboardEvent) {
 }
 
 async function checkClipboard() {
-  if (checkingClipboard || !api.desktop || !snapshot.value?.settings.clipboardEnabled || analyzing.value || submitting.value || video.value || dialog.value || batchOpen.value) return
+  if (checkingClipboard || !api.desktop || !snapshot.value?.settings.clipboardEnabled || analyzing.value || submitting.value || video.value || dialog.value || batchOpen.value || updateOpen.value) return
   checkingClipboard = true
   try {
     const source = await api.readClipboardLink()
-    if (batchOpen.value || dialog.value || video.value || analyzing.value || submitting.value) return
+    if (batchOpen.value || dialog.value || video.value || analyzing.value || submitting.value || updateOpen.value) return
     if (!source || source.url === lastClipboard) return
     lastClipboard = source.url
     if (link.value.trim() && detectedSource.value?.url !== source.url) { clipboardSuggestion.value = source; return }
@@ -281,7 +285,7 @@ async function openFolder() {
 }
 
 function onKey(event: KeyboardEvent) {
-  if (batchOpen.value) return
+  if (batchOpen.value || updateOpen.value) return
   if (event.ctrlKey && event.key.toLowerCase() === 'n') { event.preventDefault(); openBatch() }
   if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'v') { event.preventDefault(); void paste() }
   if (event.key === 'Escape' && !submitting.value) { video.value = null; dialog.value = null }
@@ -343,7 +347,7 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); stopLo
     <div class="main-shell">
       <header class="topbar" data-tauri-drag-region>
         <div class="breadcrumb" data-tauri-drag-region>工作空间 <span>/</span> <strong>{{ viewTitle }}</strong></div>
-        <div class="topbar-right"><span class="platform-badge"><span class="tiny-dot"></span> Windows 桌面版</span><button class="icon-button" aria-label="关于 SnowDown" @click="dialog = 'about'"><Info :size="18" /></button><div class="window-controls"><button aria-label="最小化窗口" title="最小化" @click="controlWindow('minimize')"><Minus :size="15" /></button><button :aria-label="maximized ? '还原窗口' : '最大化窗口'" :title="maximized ? '还原' : '最大化'" @click="controlWindow('maximize')"><Copy v-if="maximized" :size="13" /><Square v-else :size="13" /></button><button class="window-close" aria-label="关闭到托盘" title="关闭到托盘，继续下载；完全退出请使用托盘菜单" @click="controlWindow('close')"><X :size="17" /></button></div></div>
+        <div class="topbar-right"><span class="platform-badge"><span class="tiny-dot"></span> Windows 桌面版</span><UpdateCenter v-if="snapshot" ref="updateCenter" :current-version="snapshot.version" :can-prompt="!video && !dialog && !batchOpen && !analyzing && !submitting" :active-downloads="tasks.filter(task => ['queued', 'downloading', 'merging'].includes(task.status)).length" @visibility="value => updateOpen = value" /><button class="icon-button" aria-label="关于 SnowDown" @click="dialog = 'about'"><Info :size="18" /></button><div class="window-controls"><button aria-label="最小化窗口" title="最小化" @click="controlWindow('minimize')"><Minus :size="15" /></button><button :aria-label="maximized ? '还原窗口' : '最大化窗口'" :title="maximized ? '还原' : '最大化'" @click="controlWindow('maximize')"><Copy v-if="maximized" :size="13" /><Square v-else :size="13" /></button><button class="window-close" aria-label="关闭到托盘" title="关闭到托盘，继续下载；完全退出请使用托盘菜单" @click="controlWindow('close')"><X :size="17" /></button></div></div>
       </header>
 
       <main class="workspace">
@@ -417,7 +421,7 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); stopLo
         <div class="workspace-note"><span class="note-icon"><ShieldCheck :size="16" /></span><div><strong>安心收藏，文件始终在你手中</strong><p>视频直接保存到本地。关闭窗口后，SnowDown 会在系统托盘继续下载。</p></div><span class="note-decoration"><Snowflake :size="33" :stroke-width="1" /></span></div>
       </main>
 
-      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="dialog = 'about'">v{{ snapshot?.version ?? '0.1.5' }}</button></div></footer>
+      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="updateCenter?.open()">v{{ snapshot?.version ?? '0.1.6' }}</button></div></footer>
     </div>
 
     <Transition name="toast"><div v-if="toast" :class="['toast-message', toast.type]" role="status"><CircleAlert v-if="toast.type === 'error'" :size="18" /><CircleCheck v-else-if="toast.type === 'success'" :size="18" /><Info v-else :size="18" /><span>{{ toast.text }}</span><button aria-label="关闭提示" @click="toast = null"><X :size="15" /></button></div></Transition>
@@ -490,6 +494,6 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); stopLo
       </section>
     </div>
 
-    <div v-if="dialog === 'about'" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.5' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="dialog = null">开始收藏<ExternalLink :size="14" /></button></section></div>
+    <div v-if="dialog === 'about'" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.6' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="openUpdateCenter">检查更新<RotateCcw :size="14" /></button></section></div>
   </div>
 </template>

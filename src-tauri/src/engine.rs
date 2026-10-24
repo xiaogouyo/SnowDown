@@ -32,6 +32,9 @@ pub fn start_scheduler(app: AppHandle, state: Arc<AppState>) {
                 // status and persisted sibling deadlines before another task can be selected.
                 let cancel = {
                     let mut tasks = state.tasks.lock().unwrap();
+                    if state.updater.installing() {
+                        break;
+                    }
                     let mut active = state.active.lock().unwrap();
                     if active.len() >= limit {
                         break;

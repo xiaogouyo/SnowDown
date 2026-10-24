@@ -1,6 +1,6 @@
 [package]
 name = "snowdown"
-version = "0.1.5"
+version = "0.1.6"
 description = "A thoughtful local-first video downloader"
 authors = ["SnowDown"]
 edition = "2021"
@@ -30,6 +30,8 @@ md5 = "0.7"
 base64 = "0.22"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 regex = "1"
+semver = "1"
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.39.1"

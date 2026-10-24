@@ -9,6 +9,30 @@ namespace SnowDown.Setup
 {
     internal static class InstallerCore
     {
+        internal static string UpdateDirectory(string[] args)
+        {
+            foreach (string argument in args)
+                if (argument.StartsWith("--update-dir=", StringComparison.Ordinal)) return NormalizePath(argument.Substring("--update-dir=".Length));
+            return null;
+        }
+
+        internal static void WaitForUpdatingClient(string[] args)
+        {
+            foreach (string argument in args)
+            {
+                if (!argument.StartsWith("--wait-pid=", StringComparison.Ordinal)) continue;
+                int id;
+                if (!Int32.TryParse(argument.Substring("--wait-pid=".Length), out id) || id <= 0 || id == Process.GetCurrentProcess().Id)
+                    throw new ArgumentException("无法识别待退出的软件进程。");
+                try
+                {
+                    using (Process previous = Process.GetProcessById(id))
+                        if (!previous.WaitForExit(30000)) throw new InvalidOperationException("SnowDown 尚未退出，请从系统托盘退出后重试更新。");
+                }
+                catch (ArgumentException) { /* The parent already exited; do not stop another process. */ }
+            }
+        }
+
         internal static string NormalizePath(string value)
         {
             if (String.IsNullOrWhiteSpace(value) || value.IndexOfAny(new[] { '"', '\r', '\n', '\0', '<', '>', '|', '*', '?' }) >= 0)
