@@ -1,0 +1,11 @@
+{
+  "version": "9.0.1-essentials_build-www.gyan.dev",
+  "source": "https://www.gyan.dev/ffmpeg/builds/",
+  "sourceCode": "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz",
+  "license": "GPL-3.0-or-later",
+  "origin": "Reused an existing local Gyan.dev essentials distribution; binaries unmodified.",
+  "sha256": {
+    "ffmpeg": "72a489eccd008c2ec2c0a5856c5c75bc3d8bbfa90166c4566865c246445e6aa3",
+    "ffprobe": "19202b23c0043f15ad1b7bce2344f406fd52bd6efd8f995ce02e7392a1cec52f"
+  }
+}

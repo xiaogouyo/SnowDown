@@ -1,0 +1,3 @@
+SnowDown uses FFmpeg for audio/video muxing. FFmpeg is a separate executable.
+Run npm run setup:media to retrieve the Windows build and its license notices.
+The exact FFmpeg license depends on the selected build; retain all bundled notices.

@@ -1,0 +1,17 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/schemas/
+src-tauri/resources/ffmpeg.exe
+src-tauri/resources/ffprobe.exe
+.tools/
+release/
+test-results/
+*.log
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+cookies*.txt

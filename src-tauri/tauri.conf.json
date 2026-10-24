@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SnowDown",
+  "version": "0.1.0",
+  "identifier": "app.snowdown.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [{
+      "label": "main", "title": "SnowDown", "width": 1180, "height": 820,
+      "minWidth": 960, "minHeight": 660, "center": true,
+      "backgroundColor": "#f6f8fb"
+    }],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.hdslb.com https://*.bilibili.com; connect-src ipc: http://ipc.localhost; font-src 'self'; object-src 'none'; frame-src 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "useLocalToolsDir": true,
+    "targets": ["nsis"],
+    "shortDescription": "B站视频下载与本地收藏工具",
+    "resources": ["resources/ffmpeg.exe", "resources/FFMPEG-LICENSE.txt", "resources/NOTICE.txt", "resources/ffmpeg-build.json"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"],
+    "windows": { "nsis": { "displayLanguageSelector": false, "languages": ["SimpChinese"], "installMode": "currentUser" } }
+  }
+}
