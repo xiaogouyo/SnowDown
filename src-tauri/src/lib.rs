@@ -10,6 +10,8 @@ mod clipboard_watch;
 #[cfg(debug_assertions)]
 mod debug_probe;
 mod engine;
+#[cfg(debug_assertions)]
+mod minimal_probe;
 mod model;
 mod qr_login;
 mod site_sessions;
@@ -44,7 +46,7 @@ pub struct AppState {
     active: Mutex<HashMap<String, Arc<AtomicBool>>>,
     storage: Storage,
     ffmpeg: Option<PathBuf>,
-    updater: updater::Updater,
+    updater: Arc<updater::Updater>,
     clipboard: clipboard_watch::Monitor,
 }
 
@@ -112,16 +114,13 @@ fn cancel_update_download(state: State<'_, Arc<AppState>>) {
 }
 
 #[tauri::command]
-async fn download_update(
+fn download_update(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
 ) -> Result<updater::UpdateStatus, String> {
-    state
-        .updater
-        .download(|status| {
-            let _ = app.emit("snowdown://update", status);
-        })
-        .await
+    state.updater.clone().start_download(move |status| {
+        let _ = app.emit("snowdown://update", status);
+    })
 }
 
 #[tauri::command]
@@ -189,7 +188,7 @@ async fn inspect_video(
     state: State<'_, Arc<AppState>>,
 ) -> Result<VideoInfo, String> {
     let source = sites::recognize(&input)?;
-    if state.clipboard.manual(&source, clipboard::sequence()) {
+    if state.clipboard.manual(clipboard::sequence()) {
         clipboard_watch::emit(&app, &state);
     }
     inspect_source(&app, &state, &source).await
@@ -501,6 +500,10 @@ pub fn run() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/update-ui-qa-data")
             } else if std::env::var_os("SNOWDOWN_CLIPBOARD_VERIFY").is_some() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/clipboard-qa-app-data")
+            } else if std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some() {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../.tools/minimal-qa-data")
+                    .join(uuid::Uuid::new_v4().to_string())
             } else {
                 data_dir
             };
@@ -512,6 +515,19 @@ pub fn run() {
                 .download_dir()
                 .unwrap_or_else(|_| data_dir.clone())
                 .join("SnowDown");
+            #[cfg(debug_assertions)]
+            let default_download = if std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some() {
+                data_dir.join("media")
+            } else {
+                default_download
+            };
+            let updater_version = env!("CARGO_PKG_VERSION");
+            #[cfg(debug_assertions)]
+            let updater_version = if std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some() {
+                "0.0.0"
+            } else {
+                updater_version
+            };
             let settings = storage
                 .load_settings(Settings {
                     download_dir: default_download.to_string_lossy().to_string(),
@@ -534,13 +550,18 @@ pub fn run() {
                 active: Mutex::new(HashMap::new()),
                 storage,
                 ffmpeg: find_ffmpeg(&handle),
-                updater: updater::Updater::new(data_dir.join("updates"), env!("CARGO_PKG_VERSION")),
+                updater: Arc::new(updater::Updater::new(
+                    data_dir.join("updates"),
+                    updater_version,
+                )),
                 clipboard: clipboard_watch::Monitor::default(),
             });
             app.manage(state.clone());
             tray_menu::create(&handle)?;
             #[cfg(debug_assertions)]
-            if std::env::var_os("SNOWDOWN_CLIPBOARD_VERIFY").is_some() {
+            if std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some() {
+                minimal_probe::start(handle.clone());
+            } else if std::env::var_os("SNOWDOWN_CLIPBOARD_VERIFY").is_some() {
                 clipboard_probe::start(handle.clone());
             } else if std::env::var_os("SNOWDOWN_BATCH_VERIFY").is_some() {
                 batch_probe::start(handle.clone());

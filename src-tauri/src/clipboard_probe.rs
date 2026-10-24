@@ -88,7 +88,7 @@ pub fn start(app: AppHandle) {
         );
         let shown = crate::tray_menu::show(&app, cursor).is_ok();
         tokio::time::sleep(Duration::from_millis(600)).await;
-        let layout = evaluate_window(&app,"tray-menu",r#"JSON.stringify((()=>{const c=document.querySelector('.tray-card'),b=document.querySelectorAll('[role=menuitem]');return {items:b.length,brand:c?.textContent.includes('SnowDown'),version:c?.textContent.includes('v0.1.8'),noOverflow:document.documentElement.scrollWidth===innerWidth&&document.documentElement.scrollHeight===innerHeight,rounded:c?parseFloat(getComputedStyle(c).borderRadius)>0:false,transparent:getComputedStyle(document.documentElement).backgroundColor==='rgba(0, 0, 0, 0)'}})())"#).await.unwrap_or(Value::Null);
+        let layout = evaluate_window(&app,"tray-menu",r#"JSON.stringify((()=>{const c=document.querySelector('.tray-card'),b=document.querySelectorAll('[role=menuitem]');return {items:b.length,brand:c?.textContent.includes('SnowDown'),version:c?.textContent.includes('v0.1.9'),noOverflow:document.documentElement.scrollWidth===innerWidth&&document.documentElement.scrollHeight===innerHeight,rounded:c?parseFloat(getComputedStyle(c).borderRadius)>0:false,transparent:getComputedStyle(document.documentElement).backgroundColor==='rgba(0, 0, 0, 0)'}})())"#).await.unwrap_or(Value::Null);
         let popup = app.get_webview_window("tray-menu").unwrap();
         let point = popup.outer_position().unwrap();
         let size = popup.outer_size().unwrap();

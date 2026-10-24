@@ -115,6 +115,7 @@ export interface UpdateMirror {
   message: string | null
 }
 export interface UpdateStatus {
+  revision: number
   currentVersion: string
   release: UpdateRelease | null
   phase: 'idle' | 'probing' | 'downloading' | 'ready' | 'installing' | 'error'

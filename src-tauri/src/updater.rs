@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncWriteExt},
-    sync::{watch, Mutex as AsyncMutex},
+    sync::{watch, Mutex as AsyncMutex, OwnedMutexGuard},
 };
 use url::Url;
 
@@ -26,6 +26,12 @@ struct DownloadSource {
     label: String,
     latency_ms: Option<u64>,
     url: String,
+}
+
+struct DownloadJob {
+    release: ReleaseInfo,
+    cancel: watch::Receiver<u64>,
+    _operation: OwnedMutexGuard<()>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -58,6 +64,7 @@ pub enum Phase {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateStatus {
+    pub revision: u64,
     pub current_version: String,
     pub release: Option<ReleaseInfo>,
     pub phase: Phase,
@@ -81,7 +88,7 @@ pub struct Updater {
     directory: PathBuf,
     status: Mutex<UpdateStatus>,
     preferences: Mutex<Preferences>,
-    pub operation: AsyncMutex<()>,
+    pub operation: Arc<AsyncMutex<()>>,
     cancel: watch::Sender<u64>,
 }
 
@@ -230,6 +237,7 @@ impl Updater {
             directory,
             preferences: Mutex::new(preferences),
             status: Mutex::new(UpdateStatus {
+                revision: 0,
                 current_version: current.into(),
                 release: None,
                 phase: Phase::Idle,
@@ -241,7 +249,7 @@ impl Updater {
                 latency_ms: None,
                 mirrors: update_mirrors::pending(),
             }),
-            operation: AsyncMutex::new(()),
+            operation: Arc::new(AsyncMutex::new(())),
             cancel: watch::channel(0).0,
         }
     }
@@ -301,6 +309,7 @@ impl Updater {
             }
             status.release = release;
             status.error = None;
+            status.revision += 1;
         }
         Ok(self.status())
     }
@@ -330,6 +339,7 @@ impl Updater {
             return Err("无法保存稍后提醒设置，请检查文件权限。".into());
         }
         *self.preferences.lock().unwrap() = prefs;
+        self.status.lock().unwrap().revision += 1;
         Ok(self.status())
     }
 
@@ -349,14 +359,16 @@ impl Updater {
             status.phase = phase;
             status.downloaded = downloaded;
             status.error = error;
+            status.revision += 1;
         }
         self.status()
     }
 
-    pub async fn download(&self, emit: impl Fn(UpdateStatus)) -> Result<UpdateStatus, String> {
-        let _operation = self
+    fn prepare_download(&self) -> Result<DownloadJob, String> {
+        let operation = self
             .operation
-            .try_lock()
+            .clone()
+            .try_lock_owned()
             .map_err(|_| "更新操作正在进行。")?;
         let release = self
             .status
@@ -365,14 +377,53 @@ impl Updater {
             .release
             .clone()
             .ok_or("请先检查新版本。")?;
-        let mut cancel = self.cancel.subscribe();
+        let cancel = self.cancel.subscribe();
         {
             let mut status = self.status.lock().unwrap();
             status.download_source = None;
             status.latency_ms = None;
             status.mirrors = update_mirrors::pending();
         }
-        emit(self.progress(Phase::Probing, 0, None));
+        self.progress(Phase::Probing, 0, None);
+        Ok(DownloadJob {
+            release,
+            cancel,
+            _operation: operation,
+        })
+    }
+
+    /// Own the job in the native runtime. Hiding/reloading a WebView or dropping
+    /// an IPC response cannot drop the update transfer or its cancellation receiver.
+    pub fn start_download(
+        self: Arc<Self>,
+        emit: impl Fn(UpdateStatus) + Send + Sync + 'static,
+    ) -> Result<UpdateStatus, String> {
+        let job = self.prepare_download()?;
+        let status = self.status();
+        emit(status.clone());
+        tauri::async_runtime::spawn(async move {
+            let _ = self.run_download(job, emit).await;
+        });
+        Ok(status)
+    }
+
+    #[cfg(test)]
+    pub async fn download(&self, emit: impl Fn(UpdateStatus)) -> Result<UpdateStatus, String> {
+        let job = self.prepare_download()?;
+        self.run_download(job, emit).await
+    }
+
+    async fn run_download(
+        &self,
+        job: DownloadJob,
+        emit: impl Fn(UpdateStatus),
+    ) -> Result<UpdateStatus, String> {
+        let DownloadJob {
+            release,
+            mut cancel,
+            _operation,
+        } = job;
+        emit(self.status());
         let target = self.directory.join(&release.file_name);
         let result = async {
             fs::create_dir_all(&self.directory)
@@ -398,6 +449,7 @@ impl Updater {
                     let mut status = self.status.lock().unwrap();
                     let index = result.id - 1;
                     status.mirrors[index] = result;
+                    status.revision += 1;
                     drop(status);
                     emit(self.status());
                 },
@@ -544,10 +596,14 @@ impl Updater {
     }
 
     pub fn mark_installing(&self) {
-        self.status.lock().unwrap().phase = Phase::Installing;
+        let mut status = self.status.lock().unwrap();
+        status.phase = Phase::Installing;
+        status.revision += 1;
     }
     pub fn install_failed(&self) {
-        self.status.lock().unwrap().phase = Phase::Ready;
+        let mut status = self.status.lock().unwrap();
+        status.phase = Phase::Ready;
+        status.revision += 1;
     }
 }
 
@@ -680,6 +736,55 @@ mod tests {
             std::mem::size_of_val(&verify) < 32 * 1024,
             "installer verification future exceeds the IPC stack budget"
         );
+    }
+
+    #[tokio::test]
+    async fn native_background_job_survives_the_callers_release_and_emits_verified_completion() {
+        let directory = temporary();
+        fs::create_dir_all(&directory).await.unwrap();
+        fs::write(directory.join("SnowDown_0.2.0_x64-setup.exe"), b"abc")
+            .await
+            .unwrap();
+        let updater = Arc::new(seeded(directory.clone()));
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let sender = Mutex::new(Some(sender));
+        let initial = updater
+            .clone()
+            .start_download(move |status| {
+                if status.phase == Phase::Ready || status.phase == Phase::Error {
+                    if let Some(sender) = sender.lock().unwrap().take() {
+                        let _ = sender.send(status);
+                    }
+                }
+            })
+            .unwrap();
+        assert_eq!(initial.phase, Phase::Probing);
+        drop(updater);
+        let final_status = tokio::time::timeout(Duration::from_secs(5), receiver)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(final_status.phase, Phase::Ready);
+        assert!(final_status.revision > initial.revision);
+        assert_eq!(final_status.downloaded, 3);
+        fs::remove_file(directory.join("SnowDown_0.2.0_x64-setup.exe"))
+            .await
+            .unwrap();
+        fs::remove_dir(directory).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reserved_download_is_serialized_and_can_be_cancelled_before_worker_poll() {
+        let directory = temporary();
+        let updater = seeded(directory.clone());
+        let job = updater.prepare_download().unwrap();
+        assert!(updater.prepare_download().is_err());
+        updater.cancel();
+        let result = updater.run_download(job, |_| {}).await;
+        assert!(result.unwrap_err().contains("取消"));
+        assert_eq!(updater.status().phase, Phase::Error);
+        assert!(std::fs::read_dir(&directory).unwrap().next().is_none());
+        fs::remove_dir(directory).await.unwrap();
     }
 
     #[test]

@@ -10,14 +10,29 @@ import * as api from './api'
 import UiSelect from './components/UiSelect.vue'
 import BatchDownload from './components/BatchDownload.vue'
 import UpdateCenter from './components/UpdateCenter.vue'
+import MinimalMode from './components/MinimalMode.vue'
 import { identifySource, platformLabels, sourceSummary } from './sources'
 import { bytes, duration, errorMessage, statusLabels } from './format'
-import type { AppSnapshot, BatchResult, ClipboardCapture, ClipboardSnapshot, DownloadTask, OutputFormat, Settings, VideoInfo, LoginQr, Platform, SourceLink } from './types'
+import type { AppSnapshot, BatchOptions, BatchResult, ClipboardCapture, ClipboardSnapshot, DownloadTask, OutputFormat, Settings, VideoInfo, LoginQr, Platform, SourceLink } from './types'
 
 const snapshot = ref<AppSnapshot | null>(null)
 const view = ref<'active' | 'completed' | 'history'>('active')
 const link = ref('')
 const inputEdited = ref(false)
+function savedMode() { try { return localStorage.getItem('snowdown.interface') === 'minimal' } catch { return false } }
+const simpleMode = ref(savedMode())
+const simpleExpanded = ref(false)
+const simpleError = ref('')
+const simpleNotice = ref('')
+const simpleView = ref<InstanceType<typeof MinimalMode>>()
+const modeSwitching = ref(false)
+const simpleOptions = reactive<BatchOptions>({ downloadDir: '', intervalSecs: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false })
+const simpleTaskIds = ref<string[]>([])
+let simpleSessionStart = Date.now()
+let modeTimer: ReturnType<typeof setTimeout> | undefined
+let autoParseTimer: ReturnType<typeof setTimeout> | undefined
+let lastAutoSource = ''
+let parseGeneration = 0
 const linkInput = ref<HTMLInputElement>()
 const analyzing = ref(false)
 const submitting = ref(false)
@@ -64,6 +79,12 @@ let toastTimer: ReturnType<typeof setTimeout> | undefined
 let unsubscribe: (() => void) | undefined
 
 const tasks = computed(() => snapshot.value?.tasks ?? [])
+const simpleTasks = computed(() => tasks.value.filter(task => simpleTaskIds.value.includes(task.id) && task.status !== 'cancelled').slice(0, 8))
+watch([tasks, simpleMode], () => {
+  if (!simpleMode.value) return
+  const ids = tasks.value.filter(task => !['completed', 'cancelled'].includes(task.status) || task.createdAt >= simpleSessionStart).map(task => task.id)
+  simpleTaskIds.value = [...new Set([...ids, ...simpleTaskIds.value])].slice(0, 256)
+}, { immediate: true })
 const activeTasks = computed(() => tasks.value.filter(t => !['completed', 'cancelled'].includes(t.status)))
 const completedTasks = computed(() => tasks.value.filter(t => t.status === 'completed'))
 const runningTasks = computed(() => tasks.value.filter(t => ['downloading', 'merging'].includes(t.status)))
@@ -79,13 +100,35 @@ const allSelected = computed(() => currentTasks.value.length > 0 && currentTasks
 const allPagesSelected = computed(() => !!video.value && video.value.pages.every(p => selectedPages.value.includes(p.cid)))
 
 function notify(text: string, type: 'success' | 'error' | 'info' = 'info') {
+  if (simpleMode.value) { if (type === 'error') { simpleError.value = text; simpleExpanded.value = true } else simpleNotice.value = text; return }
   clearTimeout(toastTimer)
   toast.value = { text, type }
   toastTimer = setTimeout(() => { toast.value = null }, type === 'error' ? 8000 : 4500)
 }
 
 function setView(next: typeof view.value) { view.value = next; selectedTasks.value = []; filter.value = 'all'; query.value = '' }
-function focusLink() { setView('active'); linkInput.value?.focus() }
+function focusLink() { setView('active'); if (simpleMode.value) void simpleView.value?.focus(); else linkInput.value?.focus() }
+async function toggleSimpleMode() {
+  if (submitting.value) return
+  clearTimeout(modeTimer); modeSwitching.value = true
+  simpleMode.value = !simpleMode.value
+  if (simpleMode.value) { simpleExpanded.value = !!video.value || analyzing.value; if (!simpleTaskIds.value.length) simpleSessionStart = Date.now() }
+  try { localStorage.setItem('snowdown.interface', simpleMode.value ? 'minimal' : 'full') } catch { /* The current session still works without storage. */ }
+  modeTimer = setTimeout(() => { modeSwitching.value = false }, 380)
+  await nextTick(); focusLink()
+}
+function resetSimple() {
+  parseGeneration++; analyzing.value = false; video.value = null; link.value = ''; inputEdited.value = false
+  simpleExpanded.value = false; simpleError.value = ''; simpleNotice.value = ''; lastAutoSource = ''; discardClipboard()
+}
+function simpleInput(value: string) {
+  link.value = value; inputEdited.value = true; simpleError.value = ''; simpleNotice.value = ''
+  if (!value.trim()) resetSimple()
+}
+async function chooseSimpleFolder() {
+  try { const selected = await api.chooseDirectory(); if (selected) simpleOptions.downloadDir = selected }
+  catch (error) { notify(errorMessage(error), 'error') }
+}
 function openUpdateCenter() { dialog.value = null; updateCenter.value?.open() }
 function openBatch() {
   if (!snapshot.value || analyzing.value || submitting.value || video.value || dialog.value || updateOpen.value) return
@@ -99,18 +142,22 @@ function batchQueued(result: BatchResult) {
 
 async function analyze() {
   if (analyzing.value || updateOpen.value) return
+  if (simpleMode.value && pendingClipboard.value?.phase === 'parsing' && detectedSource.value?.url === pendingClipboard.value.source.url) { simpleExpanded.value = true; return }
   if (!link.value.trim()) { focusLink(); notify('先粘贴一个B站、抖音或小红书视频链接。'); return }
   const source = identifySource(link.value)
   if (!source) { notify('没有识别到支持的视频链接，可粘贴平台的完整分享内容。', 'error'); return }
+  const generation = ++parseGeneration
+  lastAutoSource = source.url
+  if (simpleMode.value) { simpleExpanded.value = true; simpleError.value = ''; simpleNotice.value = ''; video.value = null }
   link.value = source.url
   clipboardSuggestion.value = null
   analyzing.value = true
-  if (pendingClipboard.value?.source.url === source.url) discardClipboard()
+  if (pendingClipboard.value) discardClipboard()
   try {
     const result = await api.inspectVideo(link.value)
-    if (!disposed) presentVideo(result)
-  } catch (error) { notify(errorMessage(error), 'error') }
-  finally { analyzing.value = false }
+    if (!disposed && generation === parseGeneration) presentVideo(result)
+  } catch (error) { if (!disposed && generation === parseGeneration) notify(errorMessage(error), 'error') }
+  finally { if (generation === parseGeneration) analyzing.value = false }
 }
 
 async function paste() {
@@ -128,9 +175,13 @@ function onPaste(event: ClipboardEvent) {
 }
 
 function presentVideo(result: VideoInfo) {
+  lastAutoSource = identifySource(link.value)?.url ?? result.sourceUrl
   inputEdited.value = false
   video.value = result; selectedPages.value = [result.selectedCid]
   quality.value = result.qualities[0]?.id ?? 32; format.value = 'video'
+  if (simpleMode.value) simpleExpanded.value = true
+  simpleError.value = ''; simpleNotice.value = ''
+  if (snapshot.value) Object.assign(simpleOptions, { downloadDir: snapshot.value.settings.downloadDir, intervalSecs: 0, saveCover: snapshot.value.settings.saveCover, saveDanmaku: snapshot.value.settings.saveDanmaku, saveSubtitles: snapshot.value.settings.saveSubtitles })
 }
 
 function receiveClipboard(status: ClipboardSnapshot) {
@@ -151,14 +202,17 @@ function discardClipboard() {
 }
 
 function applyClipboard() {
-  if (!mainFocused.value || !snapshot.value?.settings.clipboardEnabled || analyzing.value || submitting.value || video.value || dialog.value || batchOpen.value || updateOpen.value) return
+  if (!mainFocused.value || !snapshot.value?.settings.clipboardEnabled || analyzing.value || submitting.value || (video.value && !simpleMode.value) || dialog.value || batchOpen.value || updateOpen.value) return
   const capture = pendingClipboard.value
   if (!capture) return
   clipboardSuggestion.value = capture.source
   if (inputEdited.value && link.value.trim() && detectedSource.value?.url !== capture.source.url) return
   link.value = capture.source.url
-  if (capture.phase === 'ready' && capture.video && snapshot.value.settings.clipboardAutoParse) {
+  if (simpleMode.value && ['detected', 'parsing'].includes(capture.phase)) simpleExpanded.value = true
+  if (capture.phase === 'ready' && capture.video && (snapshot.value.settings.clipboardAutoParse || simpleMode.value)) {
     presentVideo(capture.video); discardClipboard()
+  } else if (simpleMode.value && capture.phase === 'error') {
+    lastAutoSource = capture.source.url; simpleExpanded.value = true; video.value = null; simpleError.value = capture.error || '解析失败，请重试。'
   }
 }
 
@@ -182,7 +236,17 @@ async function parseClipboardSuggestion() {
 }
 
 const clipboardMessage = computed(() => pendingClipboard.value?.phase === 'parsing' ? '正在后台解析' : pendingClipboard.value?.phase === 'ready' ? '已在后台解析，点击查看' : pendingClipboard.value?.phase === 'error' ? '后台解析失败，可点击重试' : '识别到新链接')
+const simpleAnalyzing = computed(() => analyzing.value || (pendingClipboard.value?.phase === 'parsing' && detectedSource.value?.url === pendingClipboard.value.source.url))
 watch([mainFocused, analyzing, submitting, video, dialog, batchOpen, updateOpen, () => snapshot.value?.settings.clipboardEnabled, () => snapshot.value?.settings.clipboardAutoParse], applyClipboard)
+watch([link, simpleMode, mainFocused, analyzing, submitting, () => pendingClipboard.value?.phase, () => pendingClipboard.value?.id], () => {
+  clearTimeout(autoParseTimer)
+  const source = identifySource(link.value)
+  if (!simpleMode.value || !mainFocused.value || analyzing.value || submitting.value || !source || source.url === lastAutoSource) return
+  if (pendingClipboard.value?.source.url === source.url && pendingClipboard.value.phase === 'parsing') return
+  autoParseTimer = setTimeout(() => {
+    if (simpleMode.value && mainFocused.value && !analyzing.value && !submitting.value && identifySource(link.value)?.url === source.url && pendingClipboard.value?.phase !== 'parsing') void analyze()
+  }, 550)
+})
 
 function setFilter(value: string | number) { filter.value = String(value) as typeof filter.value }
 
@@ -202,6 +266,11 @@ async function submit() {
   if (!video.value || !selectedPages.value.length || submitting.value) return
   submitting.value = true
   try {
+    if (simpleMode.value) {
+      const result = await api.createBatch({ items: [{ video: video.value, pageCids: selectedPages.value, quality: quality.value, format: format.value }], options: { ...simpleOptions, intervalSecs: 0, saveDanmaku: video.value.platform === 'bilibili' && simpleOptions.saveDanmaku, saveSubtitles: video.value.platform === 'bilibili' && simpleOptions.saveSubtitles } })
+      simpleError.value = ''; simpleNotice.value = result.added ? `已加入 ${result.added} 个下载任务` : '所选内容已在下载队列中'
+      return
+    }
     await api.createTasks({ video: video.value, pageCids: selectedPages.value, quality: quality.value, format: format.value })
     notify(`已将 ${selectedPages.value.length} 个${video.value.platform === 'bilibili' ? '分P' : '视频'}加入下载队列。`, 'success')
     video.value = null; link.value = ''; setView('active')
@@ -326,9 +395,9 @@ async function openFolder() {
 
 function onKey(event: KeyboardEvent) {
   if (batchOpen.value || updateOpen.value) return
-  if (event.ctrlKey && event.key.toLowerCase() === 'n') { event.preventDefault(); openBatch() }
+  if (event.ctrlKey && event.key.toLowerCase() === 'n') { event.preventDefault(); if (simpleMode.value) { resetSimple(); focusLink() } else openBatch() }
   if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'v') { event.preventDefault(); void paste() }
-  if (event.key === 'Escape' && !submitting.value) { video.value = null; dialog.value = null }
+  if (event.key === 'Escape' && !submitting.value) { if (simpleMode.value) resetSimple(); else { video.value = null; dialog.value = null } }
 }
 
 onMounted(async () => {
@@ -351,16 +420,17 @@ onMounted(async () => {
   } catch (error) { if (!disposed) notify(`初始化失败：${errorMessage(error)}`, 'error') }
 })
 
-onUnmounted(() => { disposed = true; unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); unwatchClipboard?.(); stopLogin(); clearTimeout(toastTimer); document.removeEventListener('keydown', onKey) })
+onUnmounted(() => { disposed = true; parseGeneration++; unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); unwatchClipboard?.(); stopLogin(); clearTimeout(toastTimer); clearTimeout(modeTimer); clearTimeout(autoParseTimer); document.removeEventListener('keydown', onKey) })
 </script>
 
 <template>
   <div class="app-shell">
+    <Transition name="mode-standard"><div v-show="!simpleMode" class="standard-mode">
     <aside class="sidebar">
-      <a class="brand" href="#" @click.prevent="focusLink" aria-label="SnowDown 首页">
+      <button class="brand" type="button" @click="toggleSimpleMode" aria-label="切换到简约模式" title="切换到简约模式">
         <span class="brand-mark"><Snowflake :size="23" :stroke-width="1.8" /></span>
         <span>SnowDown<span class="brand-dot">.</span></span>
-      </a>
+      </button>
       <div class="workspace-label">我的工作空间</div>
       <nav aria-label="主导航">
         <button :class="['nav-item', { active: view === 'active' }]" @click="setView('active')">
@@ -396,7 +466,7 @@ onUnmounted(() => { disposed = true; unsubscribe?.(); unwatchWindow?.(); unwatch
     <div class="main-shell">
       <header class="topbar" data-tauri-drag-region>
         <div class="breadcrumb" data-tauri-drag-region>工作空间 <span>/</span> <strong>{{ viewTitle }}</strong></div>
-        <div class="topbar-right"><span class="platform-badge"><span class="tiny-dot"></span> Windows 桌面版</span><UpdateCenter v-if="snapshot" ref="updateCenter" :current-version="snapshot.version" :can-prompt="!video && !dialog && !batchOpen && !analyzing && !submitting" :active-downloads="tasks.filter(task => ['queued', 'downloading', 'merging'].includes(task.status)).length" @visibility="value => updateOpen = value" /><button class="icon-button" aria-label="关于 SnowDown" @click="dialog = 'about'"><Info :size="18" /></button><div class="window-controls"><button aria-label="最小化窗口" title="最小化" @click="controlWindow('minimize')"><Minus :size="15" /></button><button :aria-label="maximized ? '还原窗口' : '最大化窗口'" :title="maximized ? '还原' : '最大化'" @click="controlWindow('maximize')"><Copy v-if="maximized" :size="13" /><Square v-else :size="13" /></button><button class="window-close" aria-label="关闭到托盘" title="关闭到托盘，继续下载；完全退出请使用托盘菜单" @click="controlWindow('close')"><X :size="17" /></button></div></div>
+        <div class="topbar-right"><span class="platform-badge"><span class="tiny-dot"></span> Windows 桌面版</span><UpdateCenter v-if="snapshot" ref="updateCenter" :current-version="snapshot.version" :can-prompt="!simpleMode && !video && !dialog && !batchOpen && !analyzing && !submitting" :active-downloads="tasks.filter(task => ['queued', 'downloading', 'merging'].includes(task.status)).length" @visibility="value => updateOpen = value" /><button class="icon-button" aria-label="关于 SnowDown" @click="dialog = 'about'"><Info :size="18" /></button><div class="window-controls"><button aria-label="最小化窗口" title="最小化" @click="controlWindow('minimize')"><Minus :size="15" /></button><button :aria-label="maximized ? '还原窗口' : '最大化窗口'" :title="maximized ? '还原' : '最大化'" @click="controlWindow('maximize')"><Copy v-if="maximized" :size="13" /><Square v-else :size="13" /></button><button class="window-close" aria-label="关闭到托盘" title="关闭到托盘，继续下载；完全退出请使用托盘菜单" @click="controlWindow('close')"><X :size="17" /></button></div></div>
       </header>
 
       <main class="workspace">
@@ -470,14 +540,17 @@ onUnmounted(() => { disposed = true; unsubscribe?.(); unwatchWindow?.(); unwatch
         <div class="workspace-note"><span class="note-icon"><ShieldCheck :size="16" /></span><div><strong>安心收藏，文件始终在你手中</strong><p>视频直接保存到本地。关闭窗口后，SnowDown 会在系统托盘继续下载。</p></div><span class="note-decoration"><Snowflake :size="33" :stroke-width="1" /></span></div>
       </main>
 
-      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="updateCenter?.open()">v{{ snapshot?.version ?? '0.1.8' }}</button></div></footer>
+      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="updateCenter?.open()">v{{ snapshot?.version ?? '0.1.9' }}</button></div></footer>
     </div>
 
-    <Transition name="toast"><div v-if="toast" :class="['toast-message', toast.type]" role="status"><CircleAlert v-if="toast.type === 'error'" :size="18" /><CircleCheck v-else-if="toast.type === 'success'" :size="18" /><Info v-else :size="18" /><span>{{ toast.text }}</span><button aria-label="关闭提示" @click="toast = null"><X :size="15" /></button></div></Transition>
+    </div></Transition>
+    <Transition name="mode-minimal"><MinimalMode v-if="simpleMode" ref="simpleView" :link="link" :source="detectedSource" :video="video" :expanded="simpleExpanded" :analyzing="simpleAnalyzing" :submitting="submitting" :quality="quality" :format="format" :pages="selectedPages" :options="simpleOptions" :tasks="simpleTasks" :error="simpleError" :notice="simpleNotice" :maximized="maximized" :clipboard-hint="clipboardSuggestion ? clipboardMessage : ''" @update:link="simpleInput" @update:quality="quality = $event" @update:format="format = $event" @update:pages="selectedPages = $event" @update:options="value => Object.assign(simpleOptions, value)" @analyze="analyze" @submit="submit" @reset="resetSimple" @toggle="toggleSimpleMode" @choose-folder="chooseSimpleFolder" @window="controlWindow" @task="action" @clipboard="parseClipboardSuggestion" /></Transition>
 
-    <BatchDownload v-if="batchOpen && snapshot" :settings="snapshot.settings" @close="closeBatch" @queued="batchQueued" />
+    <Transition name="toast"><div v-if="toast && !simpleMode" :class="['toast-message', toast.type]" role="status"><CircleAlert v-if="toast.type === 'error'" :size="18" /><CircleCheck v-else-if="toast.type === 'success'" :size="18" /><Info v-else :size="18" /><span>{{ toast.text }}</span><button aria-label="关闭提示" @click="toast = null"><X :size="15" /></button></div></Transition>
 
-    <div v-if="video" class="modal-overlay" @mousedown.self="!submitting && (video = null)">
+    <BatchDownload v-if="batchOpen && snapshot && !simpleMode" :settings="snapshot.settings" @close="closeBatch" @queued="batchQueued" />
+
+    <div v-if="video && !simpleMode && !modeSwitching" class="modal-overlay" @mousedown.self="!submitting && (video = null)">
       <section class="modal video-modal" role="dialog" aria-modal="true" aria-labelledby="video-dialog-title">
         <div class="modal-header"><div><span class="eyebrow">NEW COLLECTION</span><h2 id="video-dialog-title">准备好收藏了吗？</h2></div><button class="icon-button" aria-label="关闭视频选择" :disabled="submitting" @click="video = null"><X :size="20" /></button></div>
         <div class="video-summary"><img :src="video.cover" alt="视频封面" referrerpolicy="no-referrer" /><div><h3>{{ video.title }}</h3><p>{{ video.author }}<span>·</span>{{ duration(video.duration) }}<span>·</span>{{ video.pages.length }} {{ video.platform === 'bilibili' ? '个分P' : '个视频' }}</p><small>{{ platformLabels[video.platform] }} · {{ video.bvid }}</small></div></div>
@@ -490,7 +563,7 @@ onUnmounted(() => { disposed = true; unsubscribe?.(); unwatchWindow?.(); unwatch
       </section>
     </div>
 
-    <div v-if="dialog === 'settings'" class="modal-overlay" @mousedown.self="dialog = null">
+    <div v-if="dialog === 'settings' && !simpleMode" class="modal-overlay" @mousedown.self="dialog = null">
       <section class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <div class="modal-header"><div><span class="eyebrow">MAKE IT YOURS</span><h2 id="settings-title">偏好设置</h2></div><button class="icon-button" aria-label="关闭设置" @click="dialog = null"><X :size="20" /></button></div>
         <div class="settings-tabs"><button :class="{ active: settingsTab === 'download' }" @click="settingsTab = 'download'"><SlidersHorizontal :size="15" />下载设置</button><button :class="{ active: settingsTab === 'account' }" @click="settingsTab = 'account'"><UserRound :size="15" />平台账号</button></div>
@@ -543,6 +616,6 @@ onUnmounted(() => { disposed = true; unsubscribe?.(); unwatchWindow?.(); unwatch
       </section>
     </div>
 
-    <div v-if="dialog === 'about'" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.8' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="openUpdateCenter">检查更新<RotateCcw :size="14" /></button></section></div>
+    <div v-if="dialog === 'about' && !simpleMode" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.9' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="openUpdateCenter">检查更新<RotateCcw :size="14" /></button></section></div>
   </div>
 </template>

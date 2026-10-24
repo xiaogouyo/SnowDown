@@ -5,7 +5,7 @@ import type { UpdateStatus } from '../src/types'
 
 const api = vi.hoisted(() => ({ desktop: true, getUpdateStatus: vi.fn(), checkUpdate: vi.fn(), subscribeUpdates: vi.fn(), deferUpdate: vi.fn(), downloadUpdate: vi.fn(), cancelUpdateDownload: vi.fn(), installUpdate: vi.fn(), openUpdateRelease: vi.fn() }))
 vi.mock('../src/api', () => ({ ...api, __v_isRef: false }))
-const empty: UpdateStatus = { currentVersion: '0.1.6', release: null, phase: 'idle', downloaded: 0, total: 0, error: null, deferred: false, downloadSource: null, latencyMs: null, mirrors: [] }
+const empty: UpdateStatus = { revision: 0, currentVersion: '0.1.6', release: null, phase: 'idle', downloaded: 0, total: 0, error: null, deferred: false, downloadSource: null, latencyMs: null, mirrors: [] }
 const available: UpdateStatus = { ...empty, release: { version: '0.1.7', title: 'SnowDown v0.1.7', notes: '改进下载体验\n<script>alert(1)</script>', publishedAt: '2026-10-24T12:00:00Z', url: 'https://github.com/xiaogouyo/SnowDown/releases/tag/v0.1.7', fileName: 'SnowDown_0.1.7_x64-setup.exe', size: 1024 }, total: 1024 }
 let wrapper: VueWrapper
 const dialog = () => document.body.querySelector('.update-modal')!
@@ -23,6 +23,53 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); vi.useRealTimers(); document.body.innerHTML = '' })
 
 describe('GitHub update center', () => {
+  it('blocks a new download while synchronizing the native state on reopen', async () => {
+    await flushPromises()
+    api.subscribeUpdates.mock.calls[0]![0]({ ...available, revision: 1 })
+    let resolveStatus!: (value: UpdateStatus) => void
+    api.getUpdateStatus.mockImplementationOnce(() => new Promise(resolve => { resolveStatus = resolve }))
+    await wrapper.get('button').trigger('click'); await flushPromises()
+    expect(dialog().querySelector('.update-download')?.hasAttribute('disabled')).toBe(true)
+    click('.update-download'); await flushPromises()
+    expect(api.downloadUpdate).not.toHaveBeenCalled()
+    resolveStatus({ ...available, revision: 2 }); await flushPromises()
+    expect(dialog().querySelector('.update-download')?.hasAttribute('disabled')).toBe(false)
+  })
+  it('keeps a native transfer running after hiding the panel and restores current progress', async () => {
+    await wrapper.get('button').trigger('click'); await flushPromises()
+    const begun: UpdateStatus = { ...available, revision: 2, phase: 'probing' }
+    api.downloadUpdate.mockResolvedValueOnce(begun)
+    click('.update-download'); await flushPromises()
+    click('.update-background'); await flushPromises()
+    expect(document.body.querySelector('.update-modal')).toBeNull()
+    expect(api.cancelUpdateDownload).not.toHaveBeenCalled()
+    expect(api.deferUpdate).not.toHaveBeenCalled()
+    const progress: UpdateStatus = { ...available, revision: 3, phase: 'downloading', downloaded: 512 }
+    api.getUpdateStatus.mockResolvedValue(progress)
+    await vi.advanceTimersByTimeAsync(1500); await flushPromises()
+    expect(wrapper.text()).toContain('50%')
+    const checks = api.checkUpdate.mock.calls.length
+    await wrapper.get('button').trigger('click'); await flushPromises()
+    expect(api.checkUpdate).toHaveBeenCalledTimes(checks)
+    expect(dialog().querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('50')
+    click('.update-background'); await flushPromises()
+    api.getUpdateStatus.mockResolvedValue({ ...available, revision: 4, phase: 'ready', downloaded: 1024 })
+    await vi.advanceTimersByTimeAsync(1500); await flushPromises()
+    expect(wrapper.text()).toContain('待安装')
+    await wrapper.get('button').trigger('click'); await flushPromises()
+    expect(dialog().querySelector('.update-install')).not.toBeNull()
+    expect(api.cancelUpdateDownload).not.toHaveBeenCalled()
+  })
+  it('rejects a late start response after a newer completion event', async () => {
+    await wrapper.get('button').trigger('click'); await flushPromises()
+    let finish!: (value: UpdateStatus) => void
+    api.downloadUpdate.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    click('.update-download'); await flushPromises()
+    api.subscribeUpdates.mock.calls[0]![0]({ ...available, revision: 4, phase: 'ready', downloaded: 1024 })
+    finish({ ...available, revision: 2, phase: 'probing' }); await flushPromises()
+    expect(dialog().textContent).toContain('更新已准备好')
+    expect(dialog().querySelector('.update-install')).not.toBeNull()
+  })
   it('automatically prompts a new version, renders release text safely, and persists postponement', async () => {
     await flushPromises(); await vi.advanceTimersByTimeAsync(2500); await flushPromises()
     expect(dialog().textContent).toContain('发现新版本')

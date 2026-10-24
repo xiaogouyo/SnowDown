@@ -37,7 +37,7 @@ struct Inner {
     next_id: u64,
     revision: u64,
     capture: Option<Capture>,
-    manual: Option<(u32, String)>,
+    manual: Option<u32>,
 }
 
 #[derive(Clone, Serialize)]
@@ -101,10 +101,7 @@ impl Monitor {
     pub fn detect(&self, source: sites::Source, sequence: u32) -> bool {
         let mut inner = self.inner.lock().unwrap();
         if !inner.enabled
-            || inner
-                .manual
-                .as_ref()
-                .is_some_and(|(seen, url)| *seen == sequence && *url == source.url)
+            || inner.manual == Some(sequence)
             || inner.capture.as_ref().is_some_and(|capture| {
                 capture.source.url == source.url && capture.phase != Phase::Error
             })
@@ -123,14 +120,10 @@ impl Monitor {
         self.signal();
         true
     }
-    pub fn manual(&self, source: &sites::Source, sequence: u32) -> bool {
+    pub fn manual(&self, sequence: u32) -> bool {
         let mut inner = self.inner.lock().unwrap();
-        inner.manual = Some((sequence, source.url.clone()));
-        if inner
-            .capture
-            .as_ref()
-            .is_some_and(|capture| capture.source.url == source.url)
-        {
+        inner.manual = Some(sequence);
+        if inner.capture.is_some() {
             inner.capture = None;
             inner.revision += 1;
             self.signal();
@@ -214,7 +207,9 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
     let poll_state = state.clone();
     tauri::async_runtime::spawn(async move {
         #[cfg(debug_assertions)]
-        if std::env::var_os("SNOWDOWN_CLIPBOARD_VERIFY").is_some() {
+        if std::env::var_os("SNOWDOWN_CLIPBOARD_VERIFY").is_some()
+            || std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some()
+        {
             return;
         }
         let mut seen = None;
@@ -334,14 +329,26 @@ mod tests {
         let monitor = Monitor::default();
         monitor.configure(true, true);
         let input = source("BV1xx411c7mD");
-        monitor.manual(&input, 42);
+        monitor.manual(42);
         assert!(!monitor.detect(input.clone(), 42));
         assert!(monitor.detect(input.clone(), 43));
         let revision = monitor.status().revision;
-        assert!(monitor.manual(&input, 43));
+        assert!(monitor.manual(43));
         assert!(monitor.status().revision > revision);
         assert!(monitor.snapshot().is_none());
         assert!(!monitor.detect(input.clone(), 43));
         assert!(monitor.detect(input, 44));
+    }
+    #[test]
+    fn manually_entered_source_cancels_an_older_clipboard_source() {
+        let monitor = Monitor::default();
+        let mut changes = monitor.changed.subscribe();
+        monitor.configure(true, true);
+        monitor.detect(source("BV1xx411c7mD"), 1);
+        let old = monitor.claim(&mut changes).unwrap();
+        assert!(monitor.manual(1));
+        assert!(!monitor.finish(old.id, Err("late old result".into())));
+        assert!(!monitor.detect(source("BV17x411w7KC"), 1));
+        assert!(monitor.detect(source("BV17x411w7KC"), 2));
     }
 }

@@ -2,13 +2,21 @@
 
 Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红书视频。采用 Tauri 2、Vue 3、TypeScript 与 Rust，下载文件在本机处理和保存。
 
-## 下载 v0.1.8
+## 下载 v0.1.9
 
-- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.8/SnowDown_0.1.8_x64-setup.exe)
-- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.8/SnowDown_0.1.8_Windows_x64_portable.zip)
-- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.1.8)
+- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.9/SnowDown_0.1.9_x64-setup.exe)
+- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.9/SnowDown_0.1.9_Windows_x64_portable.zip)
+- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.1.9)
 
 需要 Windows 10/11 x64 和 WebView2 运行时。免安装版请完整解压后启动，保留 `resources` 文件夹。下载文件的 SHA256 校验值随 Release 提供。
+
+## 简约模式
+
+点击左上角 SnowDown 标志进入简约模式，再次点击标志回到完整模式。两种界面带切换动画，并记住上次使用的模式。
+
+空闲时保留标志、窗口按钮和居中的圆角输入框。输入或粘贴支持的链接后自动识别解析，也可按 Enter 立即解析；输入框随动画缩小并移到顶部，下面直接显示视频信息、格式、画质、保存目录、附件和分P选择，以及下载队列进度。下载选择在页面内展开，可直接暂停、继续或定位文件。单次下载设置不改变全局偏好。
+
+剪贴板识别遵守设置总开关。简约模式在前台识别链接后会自动解析；隐藏到托盘后是否自动解析，仍使用“识别后自动解析”设置。Ctrl+N 或输入框清除按钮可重新开始，切换模式沿用当前解析结果和原生下载队列。
 
 ## 功能
 
@@ -23,7 +31,7 @@ Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红�
 - SQLite 保存设置与任务；退出后再次打开，可手动继续中断任务。
 - 可选保存封面、XML弹幕、SRT字幕；附加资源不可用不影响已下载的视频。
 - 系统托盘、单实例、打开下载目录与定位文件。托盘右键使用与主界面一致的浅色圆角菜单，支持键盘导航、Esc 和失焦关闭，按屏幕工作区域定位。
-- GitHub 新版本提醒：启动后和每 6 小时检查正式版，发现新版时弹窗；右上角版本号可随时手动检查。支持暂不更新（同一版本 24 小时内不再自动提醒）、软件内下载、进度显示、取消/重试和后台下载，校验成功后退出并打开安装器。
+- GitHub 新版本提醒：启动后和每 6 小时检查正式版，发现新版时弹窗；右上角版本号可随时手动检查。支持暂不更新（同一版本 24 小时内不再自动提醒）、软件内下载、进度显示、取消/重试和后台下载。更新任务由原生端独立持有，“后台下载”仅收起面板；右上角显示进度，重新打开从原生状态恢复，校验成功后退出并打开安装器。
 - 更新包下载前实时检测 [全部66个镜像](docs/update-mirrors.md)，选择延迟最低的可用节点；失败自动切换并最终尝试 GitHub 官方直连，完整校验官方 SHA256 后保存。更新弹窗可查看节点检测状态、延迟与下载源。
 - B站官方二维码登录，在手机B站确认；Windows DPAPI 加密保存会话，重启自动恢复，退出账号清除本机凭据。
 - 三个平台统一在软件内扫码登录；抖音、小红书二维码取自官方登录页，B站使用官方二维码接口。二维码过期自动更新，登录成功后加密保存，已登录时统一提供“退出账号”“检查登录”。抖音支持分离音视频流合并。

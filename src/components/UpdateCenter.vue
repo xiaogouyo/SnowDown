@@ -10,6 +10,7 @@ const emit = defineEmits<{ visibility: [visible: boolean] }>()
 const status = ref<UpdateStatus | null>(null)
 const visible = ref(false)
 const checking = ref(false)
+const syncing = ref(false)
 const starting = ref(false)
 const installing = ref(false)
 const cancelling = ref(false)
@@ -22,6 +23,7 @@ const closeButton = ref<HTMLButtonElement>()
 let unsubscribe: (() => void) | undefined
 let startup: ReturnType<typeof setTimeout> | undefined
 let periodic: ReturnType<typeof setInterval> | undefined
+let progressPoll: ReturnType<typeof setInterval> | undefined
 let disposed = false
 let promptedVersion = ''
 
@@ -34,7 +36,12 @@ const mirrorProgress = computed(() => mirrors.value.length ? completed.value / m
 const mirrorLabels: Record<UpdateMirror['state'], string> = { pending: '待检测', testing: '检测中', available: '可用', timeout: '超时', unsupported: '不支持', unavailable: '不可用', failed: '下载失败', cancelled: '已停止' }
 const ready = computed(() => status.value?.phase === 'ready')
 const progress = computed(() => status.value?.total ? Math.min(100, status.value.downloaded / status.value.total * 100) : 0)
-const heading = computed(() => checking.value ? '正在检查新版本' : probing.value ? '正在选择更新镜像' : downloading.value ? '正在下载更新' : ready.value ? '更新已准备好' : release.value ? '发现新版本' : '版本与更新')
+const heading = computed(() => (checking.value || syncing.value) ? '正在检查新版本' : probing.value ? '正在选择更新镜像' : downloading.value ? '正在下载更新' : ready.value ? '更新已准备好' : release.value ? '发现新版本' : '版本与更新')
+
+function acceptStatus(value: UpdateStatus) {
+  if (status.value && (value.revision ?? 0) < (status.value.revision ?? 0)) return false
+  status.value = value; return true
+}
 
 watch(visible, async value => {
   emit('visibility', value)
@@ -58,28 +65,45 @@ async function check(manual = true) {
   try {
     const result = await api.checkUpdate()
     if (disposed) return
-    status.value = result; checked.value = true; error.value = ''
+    if (!acceptStatus(result)) return
+    checked.value = true; error.value = ''
     if (!manual && result.release && !result.deferred && result.release.version !== promptedVersion) pendingAuto.value = true
   } catch (cause) { if (manual && !disposed) error.value = errorMessage(cause) }
   finally { checking.value = false }
 }
 
-function open() { visible.value = true; pendingAuto.value = false; void check(true) }
+async function open() {
+  if (syncing.value) return
+  visible.value = true; pendingAuto.value = false
+  if (!api.desktop) { void check(true); return }
+  syncing.value = true
+  try {
+    const actual = await api.getUpdateStatus()
+    if (disposed) return
+    acceptStatus(actual)
+    syncing.value = false
+    if (!['probing', 'downloading', 'ready', 'installing'].includes(actual.phase)) await check(true)
+  } catch (cause) { if (!disposed) error.value = errorMessage(cause) }
+  finally { syncing.value = false }
+}
 defineExpose({ open })
 
 async function close() {
   if (installing.value) return
+  if (downloading.value) { background(); return }
   if (release.value && !downloading.value) {
-    try { status.value = await api.deferUpdate() }
+    try { acceptStatus(await api.deferUpdate()) }
     catch (cause) { error.value = errorMessage(cause); return }
   }
   pendingAuto.value = false; visible.value = false
 }
 
+function background() { pendingAuto.value = false; visible.value = false }
+
 async function download() {
-  if (downloading.value || checking.value) return
+  if (downloading.value || checking.value || syncing.value) return
   error.value = ''; starting.value = true
-  try { const result = await api.downloadUpdate(); if (!disposed) status.value = result }
+  try { const result = await api.downloadUpdate(); if (!disposed) acceptStatus(result) }
   catch (cause) { if (!disposed) error.value = errorMessage(cause) }
   finally { starting.value = false; cancelling.value = false }
 }
@@ -111,22 +135,27 @@ function onKey(event: KeyboardEvent) {
 onMounted(async () => {
   if (!api.desktop) return
   try {
-    const unlisten = await api.subscribeUpdates(value => { if (!disposed) status.value = value })
+    const unlisten = await api.subscribeUpdates(value => { if (!disposed) acceptStatus(value) })
     if (disposed) { unlisten(); return }
     unsubscribe = unlisten
     const initial = await api.getUpdateStatus()
     if (disposed) return
-    status.value = initial
+    acceptStatus(initial)
   } catch { /* Manual check can recover if initial subscription or status failed. */ }
   if (disposed) return
   startup = setTimeout(() => { void check(false) }, 2500)
   periodic = setInterval(() => { void check(false) }, 6 * 60 * 60 * 1000)
+  progressPoll = setInterval(async () => {
+    if (!downloading.value || starting.value || disposed) return
+    try { const actual = await api.getUpdateStatus(); if (!disposed) status.value = actual }
+    catch { /* A missed event or a suspended WebView can recover on the next tick. */ }
+  }, 1500)
 })
-onUnmounted(() => { disposed = true; unsubscribe?.(); clearTimeout(startup); clearInterval(periodic) })
+onUnmounted(() => { disposed = true; unsubscribe?.(); clearTimeout(startup); clearInterval(periodic); clearInterval(progressPoll) })
 </script>
 
 <template>
-  <button ref="trigger" :class="['version-button', { available: release }]" aria-label="版本与检查更新" :title="release ? `发现新版 v${release.version}，点击更新` : '版本与检查更新'" @click="open"><span>v{{ currentVersion }}</span><span v-if="release" class="version-dot"></span></button>
+  <button ref="trigger" :class="['version-button', { available: release }]" aria-label="版本与检查更新" :title="downloading ? '更新正在后台下载，点击查看进度' : ready ? '更新包已准备好，点击查看' : release ? `发现新版 v${release.version}，点击更新` : '版本与检查更新'" @click="open"><span>v{{ currentVersion }}</span><LoaderCircle v-if="downloading" :size="11" class="spin" /><span v-if="downloading" class="version-progress">{{ probing ? '测速中' : `${Math.round(progress)}%` }}</span><span v-else-if="ready" class="version-progress">待安装</span><span v-else-if="release" class="version-dot"></span></button>
   <Teleport to="body">
     <div v-if="visible" class="modal-overlay update-overlay" @mousedown.self="close" @keydown="onKey">
       <section ref="panel" class="modal update-modal" role="dialog" aria-modal="true" aria-labelledby="update-title">
@@ -143,9 +172,9 @@ onUnmounted(() => { disposed = true; unsubscribe?.(); clearTimeout(startup); cle
             <p class="update-portable">免安装版也可在 GitHub 下载 ZIP，退出后解压覆盖原文件夹。</p>
           </template>
           <p v-if="error || status?.error" class="update-error" role="alert"><CircleAlert :size="15" />{{ error || status?.error }}</p>
-          <div class="update-links"><button class="text-button" @click="openRelease">GitHub 发布页<ArrowUpRight :size="13" /></button><button v-if="release" class="text-button" :disabled="checking || downloading || installing" @click="check(true)"><RefreshCw :size="13" />重新检查</button></div>
+          <div class="update-links"><button class="text-button" @click="openRelease">GitHub 发布页<ArrowUpRight :size="13" /></button><button v-if="release" class="text-button" :disabled="syncing || checking || downloading || installing" @click="check(true)"><RefreshCw :size="13" />重新检查</button></div>
         </div>
-        <div class="modal-footer"><span>{{ release && !downloading ? '暂不更新：24 小时内不再自动提醒此版本' : downloading ? '可在后台继续下载，稍后从右上角查看进度' : '启动时自动检查，也可随时手动检查' }}</span><div class="update-actions"><button v-if="release" class="button secondary" :disabled="installing" @click="close">{{ downloading ? '后台下载' : ready ? '稍后安装' : '暂不更新' }}</button><button v-if="downloading" class="button secondary" :disabled="cancelling" @click="cancel">{{ cancelling ? '正在取消' : '取消下载' }}</button><button v-else-if="ready" class="button primary update-install" :disabled="!!activeDownloads || installing || checking" @click="install"><LoaderCircle v-if="installing" :size="16" class="spin" /><Download v-else :size="16" />退出并打开安装器</button><button v-else-if="release" class="button primary update-download" :disabled="checking || installing" @click="download"><Download :size="16" />{{ status?.phase === 'error' ? '重试下载' : '下载更新' }}</button><button v-else class="button primary update-check" :disabled="checking" @click="check(true)"><LoaderCircle v-if="checking" :size="16" class="spin" /><RefreshCw v-else :size="16" />{{ checking ? '正在检查' : '检查更新' }}</button></div></div>
+        <div class="modal-footer"><span>{{ release && !downloading ? '暂不更新：24 小时内不再自动提醒此版本' : downloading ? '可在后台继续下载，稍后从右上角查看进度' : '启动时自动检查，也可随时手动检查' }}</span><div class="update-actions"><button v-if="downloading" class="button secondary update-background" @click="background">后台下载</button><button v-else-if="release" class="button secondary" :disabled="installing" @click="close">{{ ready ? '稍后安装' : '暂不更新' }}</button><button v-if="downloading" class="button secondary" :disabled="cancelling" @click="cancel">{{ cancelling ? '正在取消' : '取消下载' }}</button><button v-else-if="ready" class="button primary update-install" :disabled="!!activeDownloads || installing || checking" @click="install"><LoaderCircle v-if="installing" :size="16" class="spin" /><Download v-else :size="16" />退出并打开安装器</button><button v-else-if="release" class="button primary update-download" :disabled="syncing || checking || installing" @click="download"><Download :size="16" />{{ status?.phase === 'error' ? '重试下载' : '下载更新' }}</button><button v-else class="button primary update-check" :disabled="syncing || checking" @click="check(true)"><LoaderCircle v-if="checking" :size="16" class="spin" /><RefreshCw v-else :size="16" />{{ checking ? '正在检查' : '检查更新' }}</button></div></div>
       </section>
     </div>
   </Teleport>
