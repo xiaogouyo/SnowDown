@@ -2,7 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import type { AppSnapshot, CreateTaskRequest, CreateBatchRequest, BatchResult, Settings, VideoInfo, LoginQr, LoginPoll, Platform, SourceLink, UpdateStatus } from './types'
+import type { AppSnapshot, CreateTaskRequest, CreateBatchRequest, BatchResult, Settings, VideoInfo, LoginQr, LoginPoll, Platform, SourceLink, UpdateStatus, ClipboardSnapshot } from './types'
 
 export const desktop = isTauri()
 
@@ -11,7 +11,7 @@ export async function getSnapshot(): Promise<AppSnapshot> {
     tasks: [],
     settings: { downloadDir: '', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
     siteSessions: [],
-    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.7',
+    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.8',
   }
   return invoke('get_snapshot')
 }
@@ -51,9 +51,17 @@ export async function cancelLogin(platform: Platform = 'bilibili'): Promise<void
 export async function logout(platform: Platform = 'bilibili'): Promise<void> { requireDesktop(); await invoke('logout', { platform }) }
 export async function checkLogin(platform: Platform = 'bilibili'): Promise<void> { requireDesktop(); await invoke('check_login', { platform }) }
 export async function readClipboardLink(): Promise<SourceLink | null> { requireDesktop(); return invoke('read_clipboard_link') }
-export async function watchFocus(callback: () => void): Promise<() => void> {
+export async function getClipboardStatus(): Promise<ClipboardSnapshot> { requireDesktop(); return invoke('clipboard_status') }
+export async function acknowledgeClipboard(id: number): Promise<void> { requireDesktop(); await invoke('acknowledge_clipboard', { id }) }
+export async function subscribeClipboard(callback: (status: ClipboardSnapshot) => void): Promise<() => void> {
   if (!desktop) return () => {}
-  return getCurrentWindow().onFocusChanged(({ payload }) => { if (payload) callback() })
+  return listen<ClipboardSnapshot>('snowdown://clipboard', event => callback(event.payload))
+}
+export async function windowFocused(): Promise<boolean> { return desktop && await getCurrentWindow().isFocused() }
+export async function trayAction(action: 'show' | 'folder' | 'quit' | 'dismiss'): Promise<void> { requireDesktop(); await invoke('tray_action', { action }) }
+export async function watchFocus(callback: (focused: boolean) => void): Promise<() => void> {
+  if (!desktop) return () => {}
+  return getCurrentWindow().onFocusChanged(({ payload }) => callback(payload))
 }
 
 export async function windowAction(action: 'minimize' | 'maximize' | 'close'): Promise<void> {

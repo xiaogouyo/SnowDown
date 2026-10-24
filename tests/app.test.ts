@@ -6,7 +6,7 @@ import type { AppSnapshot, VideoInfo } from '../src/types'
 const api = vi.hoisted(() => ({
   desktop: true, getSnapshot: vi.fn(), subscribe: vi.fn(), inspectVideo: vi.fn(),
   createTasks: vi.fn(), createBatch: vi.fn(), taskAction: vi.fn(), saveSettings: vi.fn(), beginLogin: vi.fn(), pollLogin: vi.fn(), cancelLogin: vi.fn(), logout: vi.fn(), checkLogin: vi.fn(), windowAction: vi.fn(), watchMaximized: vi.fn(),
-  chooseDirectory: vi.fn(), openDirectory: vi.fn(), readClipboardLink: vi.fn(), watchFocus: vi.fn(),
+  chooseDirectory: vi.fn(), openDirectory: vi.fn(), readClipboardLink: vi.fn(), watchFocus: vi.fn(), windowFocused: vi.fn(), getClipboardStatus: vi.fn(), subscribeClipboard: vi.fn(), acknowledgeClipboard: vi.fn(),
   getUpdateStatus: vi.fn(), checkUpdate: vi.fn(), subscribeUpdates: vi.fn(), deferUpdate: vi.fn(), downloadUpdate: vi.fn(), cancelUpdateDownload: vi.fn(), installUpdate: vi.fn(), openUpdateRelease: vi.fn(),
 }))
 vi.mock('../src/api', () => ({ ...api, __v_isRef: false }))
@@ -26,6 +26,10 @@ let wrapper: VueWrapper
 beforeEach(() => {
   vi.clearAllMocks()
   api.readClipboardLink.mockResolvedValue(null)
+  api.windowFocused.mockResolvedValue(true)
+  api.getClipboardStatus.mockResolvedValue({ revision: 0, capture: null })
+  api.subscribeClipboard.mockResolvedValue(() => {})
+  api.acknowledgeClipboard.mockResolvedValue(undefined)
   api.watchFocus.mockResolvedValue(() => {})
   api.cancelLogin.mockResolvedValue(undefined)
   api.logout.mockResolvedValue(undefined)
@@ -154,8 +158,8 @@ describe('desktop download flow', () => {
   it('detects the clipboard on focus without replacing an edited link or starting a download', async () => {
     await flushPromises()
     await wrapper.get('input[aria-label="视频链接"]').setValue('BV1xx411c7mD')
-    api.readClipboardLink.mockResolvedValue({ platform: 'douyin', url: 'https://www.douyin.com/video/1234567890123456789' })
-    api.watchFocus.mock.calls[0]![0]()
+    api.getClipboardStatus.mockResolvedValue({ revision: 1, capture: { id: 1, source: { platform: 'douyin', url: 'https://www.douyin.com/video/1234567890123456789' }, phase: 'detected', video: null, error: null } })
+    api.watchFocus.mock.calls[0]![0](true)
     await flushPromises()
     expect(wrapper.get('.clipboard-suggestion').text()).toContain('识别到抖音')
     expect((wrapper.get('input[aria-label="视频链接"]').element as HTMLInputElement).value).toBe('BV1xx411c7mD')
@@ -163,19 +167,96 @@ describe('desktop download flow', () => {
     expect(api.createTasks).not.toHaveBeenCalled()
   })
 
-  it('offers opt-in auto parse and respects disabled clipboard recognition', async () => {
-    await flushPromises(); wrapper.unmount()
+  it('presents a natively prepared result when automatic parsing is enabled and respects opt-out', async () => {
+    await flushPromises(); wrapper.unmount(); api.inspectVideo.mockClear()
     const enabled = structuredClone(initial); enabled.settings.clipboardAutoParse = true
     api.getSnapshot.mockResolvedValue(enabled)
-    api.readClipboardLink.mockResolvedValue({ platform: 'douyin', url: 'https://www.douyin.com/video/1234567890123456789' })
+    api.getClipboardStatus.mockResolvedValue({ revision: 2, capture: { id: 1, source: { platform: 'bilibili', url: video.sourceUrl }, phase: 'ready', video, error: null } })
     wrapper = mount(App); await flushPromises()
-    expect(api.inspectVideo).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.video-modal').exists()).toBe(true)
+    expect(api.inspectVideo).not.toHaveBeenCalled()
+    expect(api.acknowledgeClipboard).toHaveBeenCalledWith(1)
     wrapper.unmount(); vi.clearAllMocks()
     enabled.settings.clipboardEnabled = false
     api.getSnapshot.mockResolvedValue(enabled)
     wrapper = mount(App); await flushPromises()
+    expect(api.getClipboardStatus).not.toHaveBeenCalled()
     expect(api.readClipboardLink).not.toHaveBeenCalled()
     expect(api.inspectVideo).not.toHaveBeenCalled()
+  })
+
+  it('keeps background results until focus returns and never starts a download automatically', async () => {
+    await flushPromises()
+    const enabled = structuredClone(initial); enabled.settings.clipboardAutoParse = true
+    api.subscribe.mock.calls[0]![0](enabled)
+    api.watchFocus.mock.calls[0]![0](false)
+    const result = { revision: 3, capture: { id: 2, source: { platform: 'bilibili', url: video.sourceUrl }, phase: 'ready', video, error: null } }
+    api.subscribeClipboard.mock.calls[0]![0](result); await flushPromises()
+    expect(wrapper.find('.video-modal').exists()).toBe(false)
+    api.getClipboardStatus.mockResolvedValue(result)
+    api.watchFocus.mock.calls[0]![0](true); await flushPromises()
+    expect(wrapper.find('.video-modal').exists()).toBe(true)
+    expect(api.createTasks).not.toHaveBeenCalled()
+    expect(api.inspectVideo).not.toHaveBeenCalled()
+  })
+
+  it('retains a result while settings are open and discards stale clipboard revisions', async () => {
+    await flushPromises()
+    const enabled = structuredClone(initial); enabled.settings.clipboardAutoParse = true
+    api.subscribe.mock.calls[0]![0](enabled)
+    await wrapper.get('.profile').trigger('click')
+    const result = { revision: 8, capture: { id: 3, source: { platform: 'bilibili', url: video.sourceUrl }, phase: 'ready', video: { ...video, title: '最新结果' }, error: null } }
+    api.subscribeClipboard.mock.calls[0]![0](result)
+    api.subscribeClipboard.mock.calls[0]![0]({ ...result, revision: 7, capture: { ...result.capture, id: 2, video: { ...video, title: '旧结果' } } }); await flushPromises()
+    expect(wrapper.find('.video-modal').exists()).toBe(false)
+    await wrapper.get('[aria-label="关闭设置"]').trigger('click'); await flushPromises()
+    expect(wrapper.get('.video-modal').text()).toContain('最新结果')
+    expect(wrapper.get('.video-modal').text()).not.toContain('旧结果')
+    expect(api.acknowledgeClipboard).toHaveBeenCalledWith(3)
+  })
+
+  it('preserves an edited link and lets the user view a cached result without reparsing', async () => {
+    await flushPromises()
+    await wrapper.get('input[aria-label="视频链接"]').setValue('BV17x411w7KC')
+    api.subscribeClipboard.mock.calls[0]![0]({ revision: 3, capture: { id: 2, source: { platform: 'bilibili', url: video.sourceUrl }, phase: 'ready', video, error: null } }); await flushPromises()
+    expect((wrapper.get('input[aria-label="视频链接"]').element as HTMLInputElement).value).toBe('BV17x411w7KC')
+    expect(wrapper.find('.video-modal').exists()).toBe(false)
+    await wrapper.get('.clipboard-suggestion .text-button').trigger('click'); await flushPromises()
+    expect(wrapper.find('.video-modal').exists()).toBe(true)
+    expect(api.inspectVideo).not.toHaveBeenCalled()
+  })
+
+  it('acknowledges ignored suggestions and recovers a failed background parse manually', async () => {
+    await flushPromises()
+    const status = { revision: 3, capture: { id: 2, source: { platform: 'bilibili', url: video.sourceUrl }, phase: 'error', video: null, error: '临时网络失败' } }
+    api.subscribeClipboard.mock.calls[0]![0](status); await flushPromises()
+    expect(wrapper.get('.clipboard-suggestion').text()).toContain('重试解析')
+    await wrapper.get('.clipboard-suggestion .text-button').trigger('click'); await flushPromises()
+    expect(api.inspectVideo).toHaveBeenCalledWith(video.sourceUrl)
+    expect(wrapper.find('.video-modal').exists()).toBe(true)
+    expect(api.acknowledgeClipboard).toHaveBeenCalledWith(2)
+  })
+
+  it('continues with the next copied link after closing a previous automatic result', async () => {
+    await flushPromises()
+    const enabled = structuredClone(initial); enabled.settings.clipboardAutoParse = true
+    api.subscribe.mock.calls[0]![0](enabled)
+    const deliver = api.subscribeClipboard.mock.calls[0]![0]
+    deliver({ revision: 2, capture: { id: 1, source: { platform: 'bilibili', url: video.sourceUrl }, phase: 'ready', video, error: null } }); await flushPromises()
+    await wrapper.get('[aria-label="关闭视频选择"]').trigger('click')
+    deliver({ revision: 4, capture: { id: 2, source: { platform: 'bilibili', url: 'https://www.bilibili.com/video/BV17x411w7KC' }, phase: 'ready', video: { ...video, title: '下一个复制的链接' }, error: null } }); await flushPromises()
+    expect(wrapper.get('.video-modal').text()).toContain('下一个复制的链接')
+    expect(api.acknowledgeClipboard.mock.calls.map(call => call[0])).toEqual([1, 2])
+    expect(api.inspectVideo).not.toHaveBeenCalled()
+  })
+
+  it('releases a subscription that arrives after the component has unmounted', async () => {
+    await flushPromises(); wrapper.unmount()
+    let complete!: (stop: () => void) => void
+    api.subscribe.mockImplementationOnce(() => new Promise(resolve => { complete = resolve }))
+    const stop = vi.fn()
+    wrapper = mount(App); wrapper.unmount(); complete(stop); await flushPromises()
+    expect(stop).toHaveBeenCalledTimes(1)
   })
 
   it('starts with a real empty queue and disables empty bulk actions', async () => {

@@ -99,6 +99,14 @@ export interface UpdateRelease {
   fileName: string
   size: number
 }
+export interface ClipboardCapture {
+  id: number
+  source: SourceLink
+  phase: 'detected' | 'parsing' | 'ready' | 'error'
+  video: VideoInfo | null
+  error: string | null
+}
+export interface ClipboardSnapshot { revision: number; capture: ClipboardCapture | null }
 export interface UpdateMirror {
   id: number
   host: string

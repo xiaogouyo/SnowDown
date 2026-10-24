@@ -5,6 +5,9 @@ mod batch_probe;
 mod bilibili;
 mod clipboard;
 #[cfg(debug_assertions)]
+mod clipboard_probe;
+mod clipboard_watch;
+#[cfg(debug_assertions)]
 mod debug_probe;
 mod engine;
 mod model;
@@ -12,6 +15,7 @@ mod qr_login;
 mod site_sessions;
 mod sites;
 mod storage;
+mod tray_menu;
 mod update_mirrors;
 mod updater;
 mod web_capture;
@@ -27,8 +31,7 @@ use std::{
 };
 use storage::Storage;
 use tauri::{
-    menu::{Menu, MenuItem},
-    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, State,
 };
 
@@ -42,6 +45,7 @@ pub struct AppState {
     storage: Storage,
     ffmpeg: Option<PathBuf>,
     updater: updater::Updater,
+    clipboard: clipboard_watch::Monitor,
 }
 
 impl AppState {
@@ -185,21 +189,56 @@ async fn inspect_video(
     state: State<'_, Arc<AppState>>,
 ) -> Result<VideoInfo, String> {
     let source = sites::recognize(&input)?;
+    if state.clipboard.manual(&source, clipboard::sequence()) {
+        clipboard_watch::emit(&app, &state);
+    }
+    inspect_source(&app, &state, &source).await
+}
+
+async fn inspect_source(
+    app: &AppHandle,
+    state: &AppState,
+    source: &sites::Source,
+) -> Result<VideoInfo, String> {
     if source.platform == Platform::Bilibili {
         bilibili::inspect(&source.url, &state.auth.cookie()).await
     } else {
-        Ok(state.site_sessions.resolve(&app, &source, 0).await?.info)
+        Ok(state.site_sessions.resolve(app, source, 0).await?.info)
     }
 }
 
 #[tauri::command]
-fn read_clipboard_link(window: tauri::WebviewWindow) -> Result<Option<sites::Source>, String> {
-    if !window.is_focused().unwrap_or(false) {
-        return Ok(None);
-    }
-    Ok(clipboard::read_text()?.and_then(|text| sites::recognize(&text).ok()))
+async fn read_clipboard_link() -> Result<Option<sites::Source>, String> {
+    tokio::task::spawn_blocking(|| {
+        for attempt in 0..5 {
+            match clipboard::read_text() {
+                Ok(text) => return Ok(text.and_then(|text| sites::recognize(&text).ok())),
+                Err(error) if attempt == 4 => return Err(error),
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(25)),
+            }
+        }
+        Ok(None)
+    })
+    .await
+    .map_err(|_| "无法读取剪贴板。".to_string())?
 }
 
+#[tauri::command]
+fn clipboard_status(state: State<'_, Arc<AppState>>) -> clipboard_watch::Snapshot {
+    state.clipboard.status()
+}
+
+#[tauri::command]
+fn acknowledge_clipboard(app: AppHandle, state: State<'_, Arc<AppState>>, id: u64) {
+    if state.clipboard.acknowledge(id) {
+        clipboard_watch::emit(&app, &state);
+    }
+}
+
+#[tauri::command]
+fn tray_action(app: AppHandle, action: tray_menu::Action) -> Result<(), String> {
+    tray_menu::action(&app, action)
+}
 #[tauri::command]
 fn create_tasks(
     app: AppHandle,
@@ -317,6 +356,13 @@ fn save_settings(
     std::fs::create_dir_all(&settings.download_dir).map_err(|e| format!("无法使用此目录：{e}"))?;
     state.storage.save_settings(&settings)?;
     *state.settings.lock().unwrap() = settings;
+    let settings = state.settings.lock().unwrap().clone();
+    if state
+        .clipboard
+        .configure(settings.clipboard_enabled, settings.clipboard_auto_parse)
+    {
+        clipboard_watch::emit(&app, &state);
+    }
     state.emit(&app);
     Ok(())
 }
@@ -453,6 +499,8 @@ pub fn run() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/batch-qa-app-data")
             } else if std::env::var_os("SNOWDOWN_UPDATE_LAYOUT").is_some() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/update-ui-qa-data")
+            } else if std::env::var_os("SNOWDOWN_CLIPBOARD_VERIFY").is_some() {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/clipboard-qa-app-data")
             } else {
                 data_dir
             };
@@ -487,45 +535,41 @@ pub fn run() {
                 storage,
                 ffmpeg: find_ffmpeg(&handle),
                 updater: updater::Updater::new(data_dir.join("updates"), env!("CARGO_PKG_VERSION")),
+                clipboard: clipboard_watch::Monitor::default(),
             });
             app.manage(state.clone());
+            tray_menu::create(&handle)?;
             #[cfg(debug_assertions)]
-            if std::env::var_os("SNOWDOWN_BATCH_VERIFY").is_some() {
+            if std::env::var_os("SNOWDOWN_CLIPBOARD_VERIFY").is_some() {
+                clipboard_probe::start(handle.clone());
+            } else if std::env::var_os("SNOWDOWN_BATCH_VERIFY").is_some() {
                 batch_probe::start(handle.clone());
             } else {
                 debug_probe::start(handle.clone());
             }
-            let show = MenuItem::with_id(app, "show", "打开 SnowDown", true, None::<&str>)?;
-            let folder = MenuItem::with_id(app, "folder", "打开下载目录", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "退出 SnowDown", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &folder, &quit])?;
             let mut tray = TrayIconBuilder::with_id("main-tray")
                 .tooltip("SnowDown · 好内容，慢慢收藏")
-                .menu(&menu)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => show_main(app),
-                    "folder" => {
-                        let state = app.state::<Arc<AppState>>();
-                        let _ = open_download_directory(app.clone(), state);
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, event| match event {
+                    TrayIconEvent::Click {
+                        button: MouseButton::Right,
+                        button_state: MouseButtonState::Up,
+                        position,
+                        ..
+                    } => {
+                        let _ = tray_menu::show(tray.app_handle(), position);
                     }
-                    "quit" => app.exit(0),
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if matches!(
-                        event,
-                        TrayIconEvent::DoubleClick {
-                            button: MouseButton::Left,
-                            ..
-                        }
-                    ) {
-                        show_main(tray.app_handle());
-                    }
+                    TrayIconEvent::DoubleClick {
+                        button: MouseButton::Left,
+                        ..
+                    } => show_main(tray.app_handle()),
+                    _ => (),
                 });
             if let Some(icon) = app.default_window_icon() {
                 tray = tray.icon(icon.clone());
             }
             tray.build(app)?;
+            clipboard_watch::start(handle.clone(), state.clone());
             let auth_handle = handle.clone();
             let auth_state = state.clone();
             tauri::async_runtime::spawn(async move {
@@ -537,7 +581,7 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
+                if matches!(window.label(), "main" | "tray-menu") {
                     api.prevent_close();
                     let _ = window.hide();
                 }
@@ -563,6 +607,9 @@ pub fn run() {
             logout,
             check_login,
             read_clipboard_link,
+            clipboard_status,
+            acknowledge_clipboard,
+            tray_action,
             open_download_directory
         ])
         .run(tauri::generate_context!())

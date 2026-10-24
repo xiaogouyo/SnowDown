@@ -12,11 +12,12 @@ import BatchDownload from './components/BatchDownload.vue'
 import UpdateCenter from './components/UpdateCenter.vue'
 import { identifySource, platformLabels, sourceSummary } from './sources'
 import { bytes, duration, errorMessage, statusLabels } from './format'
-import type { AppSnapshot, BatchResult, DownloadTask, OutputFormat, Settings, VideoInfo, LoginQr, Platform, SourceLink } from './types'
+import type { AppSnapshot, BatchResult, ClipboardCapture, ClipboardSnapshot, DownloadTask, OutputFormat, Settings, VideoInfo, LoginQr, Platform, SourceLink } from './types'
 
 const snapshot = ref<AppSnapshot | null>(null)
 const view = ref<'active' | 'completed' | 'history'>('active')
 const link = ref('')
+const inputEdited = ref(false)
 const linkInput = ref<HTMLInputElement>()
 const analyzing = ref(false)
 const submitting = ref(false)
@@ -33,7 +34,12 @@ const settingsTab = ref<'download' | 'account'>('download')
 const settingsDraft = reactive<Settings>({ downloadDir: '', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false })
 const accountPlatform = ref<Platform>('bilibili')
 const clipboardSuggestion = ref<SourceLink | null>(null)
-let lastClipboard = ''
+const pendingClipboard = ref<ClipboardCapture | null>(null)
+const mainFocused = ref(false)
+let clipboardRevision = -1
+let acknowledgedClipboard = 0
+let unwatchClipboard: (() => void) | undefined
+let disposed = false
 let unwatchFocus: (() => void) | undefined
 let checkingClipboard = false
 const detectedSource = computed(() => identifySource(link.value))
@@ -99,12 +105,10 @@ async function analyze() {
   link.value = source.url
   clipboardSuggestion.value = null
   analyzing.value = true
+  if (pendingClipboard.value?.source.url === source.url) discardClipboard()
   try {
     const result = await api.inspectVideo(link.value)
-    video.value = result
-    selectedPages.value = [result.selectedCid]
-    quality.value = result.qualities[0]?.id ?? 32
-    format.value = 'video'
+    if (!disposed) presentVideo(result)
   } catch (error) { notify(errorMessage(error), 'error') }
   finally { analyzing.value = false }
 }
@@ -113,36 +117,72 @@ async function paste() {
   try {
     const source = await api.readClipboardLink()
     if (!source) { notify('剪贴板中没有B站、抖音或小红书视频链接。'); return }
-    link.value = source.url; lastClipboard = source.url; linkInput.value?.focus()
+    link.value = source.url; linkInput.value?.focus()
     await analyze()
   } catch { focusLink(); notify('无法读取剪贴板，请按 Ctrl+V 粘贴链接，再按 Enter 解析。') }
 }
 
 function onPaste(event: ClipboardEvent) {
   const source = identifySource(event.clipboardData?.getData('text/plain') ?? '')
-  if (source) { event.preventDefault(); link.value = source.url; clipboardSuggestion.value = null }
+  if (source) { event.preventDefault(); inputEdited.value = true; link.value = source.url; clipboardSuggestion.value = null }
+}
+
+function presentVideo(result: VideoInfo) {
+  inputEdited.value = false
+  video.value = result; selectedPages.value = [result.selectedCid]
+  quality.value = result.qualities[0]?.id ?? 32; format.value = 'video'
+}
+
+function receiveClipboard(status: ClipboardSnapshot) {
+  if (disposed || status.revision < clipboardRevision) return
+  clipboardRevision = status.revision
+  pendingClipboard.value = status.capture && status.capture.id > acknowledgedClipboard ? status.capture : null
+  if (!pendingClipboard.value) clipboardSuggestion.value = null
+  applyClipboard()
+}
+
+function discardClipboard() {
+  const capture = pendingClipboard.value
+  pendingClipboard.value = null; clipboardSuggestion.value = null
+  if (capture) {
+    acknowledgedClipboard = Math.max(acknowledgedClipboard, capture.id)
+    void api.acknowledgeClipboard(capture.id).catch(() => {})
+  }
+}
+
+function applyClipboard() {
+  if (!mainFocused.value || !snapshot.value?.settings.clipboardEnabled || analyzing.value || submitting.value || video.value || dialog.value || batchOpen.value || updateOpen.value) return
+  const capture = pendingClipboard.value
+  if (!capture) return
+  clipboardSuggestion.value = capture.source
+  if (inputEdited.value && link.value.trim() && detectedSource.value?.url !== capture.source.url) return
+  link.value = capture.source.url
+  if (capture.phase === 'ready' && capture.video && snapshot.value.settings.clipboardAutoParse) {
+    presentVideo(capture.video); discardClipboard()
+  }
 }
 
 async function checkClipboard() {
-  if (checkingClipboard || !api.desktop || !snapshot.value?.settings.clipboardEnabled || analyzing.value || submitting.value || video.value || dialog.value || batchOpen.value || updateOpen.value) return
+  if (checkingClipboard || !api.desktop || disposed) return
   checkingClipboard = true
   try {
-    const source = await api.readClipboardLink()
-    if (batchOpen.value || dialog.value || video.value || analyzing.value || submitting.value || updateOpen.value) return
-    if (!source || source.url === lastClipboard) return
-    lastClipboard = source.url
-    if (link.value.trim() && detectedSource.value?.url !== source.url) { clipboardSuggestion.value = source; return }
-    link.value = source.url; clipboardSuggestion.value = source
-    if (snapshot.value?.settings.clipboardAutoParse) await analyze()
-  } catch { /* Automatic detection is quiet; explicit paste reports errors. */ }
+    receiveClipboard(await api.getClipboardStatus())
+  } catch { /* The native monitor keeps the result for the next successful sync. */ }
   finally { checkingClipboard = false }
 }
 
 async function parseClipboardSuggestion() {
   if (!clipboardSuggestion.value) return
   link.value = clipboardSuggestion.value.url
+  const capture = pendingClipboard.value
+  if (capture?.phase === 'ready' && capture.video && capture.source.url === link.value) {
+    presentVideo(capture.video); discardClipboard(); return
+  }
   await analyze()
 }
+
+const clipboardMessage = computed(() => pendingClipboard.value?.phase === 'parsing' ? '正在后台解析' : pendingClipboard.value?.phase === 'ready' ? '已在后台解析，点击查看' : pendingClipboard.value?.phase === 'error' ? '后台解析失败，可点击重试' : '识别到新链接')
+watch([mainFocused, analyzing, submitting, video, dialog, batchOpen, updateOpen, () => snapshot.value?.settings.clipboardEnabled, () => snapshot.value?.settings.clipboardAutoParse], applyClipboard)
 
 function setFilter(value: string | number) { filter.value = String(value) as typeof filter.value }
 
@@ -294,15 +334,24 @@ function onKey(event: KeyboardEvent) {
 onMounted(async () => {
   document.addEventListener('keydown', onKey)
   try {
-    unsubscribe = await api.subscribe((state) => { snapshot.value = state })
-    snapshot.value = await api.getSnapshot()
-    unwatchWindow = await api.watchMaximized(value => { maximized.value = value })
-    unwatchFocus = await api.watchFocus(() => { void checkClipboard() })
-    await checkClipboard()
-  } catch (error) { notify(`初始化失败：${errorMessage(error)}`, 'error') }
+    const stopState = await api.subscribe((state) => { if (!disposed) snapshot.value = state })
+    if (disposed) { stopState(); return }; unsubscribe = stopState
+    const initial = await api.getSnapshot()
+    if (disposed) return
+    snapshot.value = initial
+    unwatchWindow = await api.watchMaximized(value => { if (!disposed) maximized.value = value })
+    if (disposed) { unwatchWindow(); return }
+    unwatchClipboard = await api.subscribeClipboard(receiveClipboard)
+    if (disposed) { unwatchClipboard(); return }
+    unwatchFocus = await api.watchFocus(focused => { if (disposed) return; mainFocused.value = focused; if (focused) void checkClipboard() })
+    if (disposed) { unwatchFocus(); return }
+    mainFocused.value = await api.windowFocused()
+    if (disposed) return
+    if (snapshot.value.settings.clipboardEnabled) await checkClipboard()
+  } catch (error) { if (!disposed) notify(`初始化失败：${errorMessage(error)}`, 'error') }
 })
 
-onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); stopLogin(); clearTimeout(toastTimer); document.removeEventListener('keydown', onKey) })
+onUnmounted(() => { disposed = true; unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); unwatchClipboard?.(); stopLogin(); clearTimeout(toastTimer); document.removeEventListener('keydown', onKey) })
 </script>
 
 <template>
@@ -360,12 +409,12 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); stopLo
           <div class="link-card-label"><div class="platform-list"><span v-for="platform in platformList" :key="platform" :class="['platform-chip', platform, { detected: detectedSource?.platform === platform }]">{{ platformLabels[platform] }}</span></div><span>从一个链接开始收藏</span><span class="local-badge"><ShieldCheck :size="12" />本地下载</span></div>
           <form class="link-form" @submit.prevent="analyze">
             <Link2 :size="19" class="link-icon" />
-            <input ref="linkInput" v-model="link" aria-label="视频链接" placeholder="粘贴B站、抖音、小红书链接，或完整分享内容…" :disabled="analyzing" spellcheck="false" @paste="onPaste" />
+            <input ref="linkInput" v-model="link" aria-label="视频链接" placeholder="粘贴B站、抖音、小红书链接，或完整分享内容…" :disabled="analyzing" spellcheck="false" @paste="onPaste" @input="inputEdited = true" />
             <button class="paste-button" type="button" title="读取剪贴板并解析 · Ctrl+Shift+V" :disabled="analyzing" @click="paste"><ClipboardPaste :size="15" /><span>粘贴并解析</span></button>
             <button class="button primary analyze-button" type="submit" :disabled="analyzing"><LoaderCircle v-if="analyzing" :size="16" class="spin" /><Download v-else :size="16" />{{ analyzing ? '正在解析' : '解析视频' }}</button>
           </form>
           <div class="link-card-footer"><span v-if="detectedSource" class="recognized-source"><CircleCheck :size="13" />已识别{{ platformLabels[detectedSource.platform] }}<small>{{ sourceSummary(detectedSource) }}</small></span><span v-else><Check :size="13" />自动识别平台 · 支持分享短链接</span><button v-if="detectedSource && detectedSource.platform !== 'bilibili'" class="text-button" @click="openSourceLogin">登录{{ platformLabels[detectedSource.platform] }}</button><span class="shortcut-tip"><kbd>Ctrl Shift V</kbd> 粘贴并解析 · <kbd>Enter</kbd> 解析</span></div>
-          <div v-if="clipboardSuggestion" class="clipboard-suggestion"><ClipboardPaste :size="15" /><span>剪贴板识别到{{ platformLabels[clipboardSuggestion.platform] }}链接</span><button class="text-button" @click="parseClipboardSuggestion">立即解析<ArrowUpRight :size="13" /></button><button class="icon-button" aria-label="忽略剪贴板链接" @click="clipboardSuggestion = null"><X :size="14" /></button></div>
+          <div v-if="clipboardSuggestion" class="clipboard-suggestion"><LoaderCircle v-if="pendingClipboard?.phase === 'parsing'" :size="15" class="spin" /><ClipboardPaste v-else :size="15" /><span>剪贴板识别到{{ platformLabels[clipboardSuggestion.platform] }}链接 · {{ clipboardMessage }}</span><button class="text-button" :disabled="pendingClipboard?.phase === 'parsing'" @click="parseClipboardSuggestion">{{ pendingClipboard?.phase === 'ready' ? '查看结果' : pendingClipboard?.phase === 'error' ? '重试解析' : '立即解析' }}<ArrowUpRight :size="13" /></button><button class="icon-button" aria-label="忽略剪贴板链接" @click="discardClipboard"><X :size="14" /></button></div>
         </section>
 
         <section class="task-section">
@@ -421,7 +470,7 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); stopLo
         <div class="workspace-note"><span class="note-icon"><ShieldCheck :size="16" /></span><div><strong>安心收藏，文件始终在你手中</strong><p>视频直接保存到本地。关闭窗口后，SnowDown 会在系统托盘继续下载。</p></div><span class="note-decoration"><Snowflake :size="33" :stroke-width="1" /></span></div>
       </main>
 
-      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="updateCenter?.open()">v{{ snapshot?.version ?? '0.1.7' }}</button></div></footer>
+      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="updateCenter?.open()">v{{ snapshot?.version ?? '0.1.8' }}</button></div></footer>
     </div>
 
     <Transition name="toast"><div v-if="toast" :class="['toast-message', toast.type]" role="status"><CircleAlert v-if="toast.type === 'error'" :size="18" /><CircleCheck v-else-if="toast.type === 'success'" :size="18" /><Info v-else :size="18" /><span>{{ toast.text }}</span><button aria-label="关闭提示" @click="toast = null"><X :size="15" /></button></div></Transition>
@@ -449,8 +498,8 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); stopLo
           <label class="field-label">下载位置</label><div class="folder-field"><FolderOpen :size="17" /><input v-model="settingsDraft.downloadDir" placeholder="选择本地文件夹" aria-label="下载位置" /><button @click="chooseFolder">浏览</button></div>
           <div class="settings-two-col"><div><span class="field-label">同时下载任务数</span><UiSelect :model-value="settingsDraft.concurrency" :options="concurrencyOptions" label="同时下载任务数" @update:model-value="value => settingsDraft.concurrency = Number(value)" /></div><label><span class="field-label">单任务限速（MB/s）</span><input v-model.number="settingsDraft.maxSpeedMbps" type="number" min="0" max="1024" /><small>设为 0 表示不限速</small></label></div>
           <div class="settings-divider"></div><h3 class="settings-section-title">剪贴板与快速解析</h3>
-          <label class="toggle-row"><span><ClipboardPaste :size="17" /><span>识别剪贴板链接<small>回到软件时检查，仅识别支持的平台链接</small></span></span><input v-model="settingsDraft.clipboardEnabled" type="checkbox" role="switch" /></label>
-          <label class="toggle-row"><span><Link2 :size="17" /><span>识别后自动解析<small>默认仅提示；开启后自动打开下载选择</small></span></span><input v-model="settingsDraft.clipboardAutoParse" :disabled="!settingsDraft.clipboardEnabled" type="checkbox" role="switch" /></label>
+          <label class="toggle-row"><span><ClipboardPaste :size="17" /><span>识别剪贴板链接<small>后台持续识别支持的平台链接，关闭到托盘后仍生效</small></span></span><input v-model="settingsDraft.clipboardEnabled" type="checkbox" role="switch" /></label>
+          <label class="toggle-row"><span><Link2 :size="17" /><span>识别后自动解析<small>后台准备最新链接，回到窗口查看；不会自动下载</small></span></span><input v-model="settingsDraft.clipboardAutoParse" :disabled="!settingsDraft.clipboardEnabled" type="checkbox" role="switch" /></label>
           <div class="settings-divider"></div><h3 class="settings-section-title">顺便一起收藏</h3><p class="settings-description">可用时，与视频保存在同一文件夹。弹幕与字幕目前适用于B站。</p>
           <label class="toggle-row"><span><Film :size="17" /><span>保存视频封面<small>原始封面图片</small></span></span><input v-model="settingsDraft.saveCover" type="checkbox" role="switch" /></label>
           <label class="toggle-row"><span><FileText :size="17" /><span>保存弹幕<small>XML 格式</small></span></span><input v-model="settingsDraft.saveDanmaku" type="checkbox" role="switch" /></label>
@@ -494,6 +543,6 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); stopLo
       </section>
     </div>
 
-    <div v-if="dialog === 'about'" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.7' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="openUpdateCenter">检查更新<RotateCcw :size="14" /></button></section></div>
+    <div v-if="dialog === 'about'" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.8' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="openUpdateCenter">检查更新<RotateCcw :size="14" /></button></section></div>
   </div>
 </template>
