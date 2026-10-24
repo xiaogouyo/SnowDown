@@ -331,7 +331,7 @@ pub fn from_browser(source: &Source, value: &Value, quality: u32) -> Result<Reso
     let page_source = recognize(value["pageUrl"].as_str().unwrap_or_default())?;
     let id = video_id(source)?;
     if page_source.platform != source.platform || video_id(&page_source)? != id {
-        return Err("请在官方窗口打开当前视频，播放后返回重试。".into());
+        return Err("后台页面尚未加载输入链接对应的视频。".into());
     }
     if source.platform == Platform::Xiaohongshu && value["state"].is_object() {
         return build_resolved(source, &id, parse_xhs(&value["state"], &id)?, quality);
@@ -346,16 +346,16 @@ pub fn from_browser(source: &Source, value: &Value, quality: u32) -> Result<Reso
     let player = &value["player"];
     let url = text(&player["url"]);
     if url.starts_with("blob:") || url.is_empty() {
-        return Err("网页已使用分段播放，但尚未取得当前视频详情。请刷新软件内官方页面，播放当前视频后重试。".into());
+        return Err("正在等待目标视频的详情数据。".into());
     }
     media_url(source.platform, &url)?;
     if url.to_lowercase().contains(".m3u8") || url.to_lowercase().contains(".mpd") {
-        return Err("网页使用分段播放，请保存会话后重新解析。".into());
+        return Err("目标视频未返回可用的媒体详情。".into());
     }
     let width = player["width"].as_u64().unwrap_or(0);
     let height = player["height"].as_u64().unwrap_or(0);
     if width == 0 || height == 0 {
-        return Err("请先在官方窗口播放当前视频，再返回解析。".into());
+        return Err("目标视频尚未加载完成。".into());
     }
     let mut resolved = build_resolved(
         source,

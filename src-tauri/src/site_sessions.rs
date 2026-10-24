@@ -20,6 +20,7 @@ pub struct Sessions {
     cookies: Mutex<HashMap<Platform, String>>,
     media: Mutex<HashMap<(Platform, String), (Instant, sites::Resolved)>>,
     observed: Mutex<Observed>,
+    parsers: [tokio::sync::Mutex<()>; 2],
 }
 #[derive(Default)]
 struct Observed {
@@ -57,6 +58,7 @@ impl Sessions {
             cookies: Mutex::new(cookies),
             media: Mutex::new(HashMap::new()),
             observed: Mutex::new(Observed::default()),
+            parsers: [tokio::sync::Mutex::new(()), tokio::sync::Mutex::new(())],
         }
     }
     pub fn cookie(&self, platform: Platform) -> String {
@@ -229,21 +231,15 @@ impl Sessions {
                 }
             }
         }
-        if let Ok(result) = read_video(app, source, quality).await {
-            self.media
-                .lock()
-                .unwrap()
-                .insert(key, (Instant::now(), result.clone()));
-            return Ok(result);
-        }
-        let result = match sites::resolve(source, quality, &self.cookie(source.platform)).await {
-            Ok(resolved) => resolved,
-            Err(native_error) => match read_video(app, source, quality).await {
+        let result = if let Some(result) = self.observed_video(source, quality) {
+            result?
+        } else if source.platform == Platform::Xiaohongshu {
+            match sites::resolve(source, quality, &self.cookie(source.platform)).await {
                 Ok(resolved) => resolved,
-                Err(browser_error) => {
-                    return Err(format!("{native_error} 官方页面：{browser_error}"))
-                }
-            },
+                Err(_) => self.resolve_in_background(app, source, quality).await?,
+            }
+        } else {
+            self.resolve_in_background(app, source, quality).await?
         };
         let result_key = (source.platform, result.info.bvid.clone());
         let mut media = self.media.lock().unwrap();
@@ -253,31 +249,48 @@ impl Sessions {
         media.insert(result_key, (Instant::now(), result.clone()));
         Ok(result)
     }
+
+    async fn resolve_in_background(
+        &self,
+        app: &AppHandle,
+        source: &sites::Source,
+        quality: u32,
+    ) -> Result<sites::Resolved, String> {
+        let index = match source.platform {
+            Platform::Douyin => 0,
+            Platform::Xiaohongshu => 1,
+            Platform::Bilibili => return Err("B站使用专用解析器。".into()),
+        };
+        // A single page per platform shares its login profile. Serialize page
+        // navigation so concurrent queue items cannot replace each other's source.
+        let _guard = self.parsers[index].lock().await;
+        if let Some(result) = self.observed_video(source, quality) {
+            return result;
+        }
+        let window = open_parser(app, source)?;
+        let result = tokio::time::timeout(Duration::from_secs(25), async {
+            loop {
+                tokio::time::sleep(Duration::from_millis(750)).await;
+                if let Ok(resolved) = read_video(app, source, quality).await { return Ok(resolved); }
+                if window.url().ok().is_some_and(|url| url.path().contains("login")) {
+                    return Err(format!("{}需要登录，请点击“登录{}”完成登录后，再点击“解析视频”。", source.platform.label(), source.platform.label()));
+                }
+            }
+        }).await.unwrap_or_else(|_| Err(format!("{}暂未返回此链接的视频详情。请确认链接有效；如需登录或验证，请在平台账号中完成后重新解析。", source.platform.label())));
+        // Stop playback and network work once metadata is available; the login
+        // window is never navigated, shown or used as the download source.
+        let _ = window.navigate("about:blank".parse().unwrap());
+        result
+    }
 }
 
-pub fn open_official(
-    app: &AppHandle,
-    platform: Platform,
-    input: Option<String>,
-) -> Result<(), String> {
+pub fn open_official(app: &AppHandle, platform: Platform) -> Result<(), String> {
     if platform == Platform::Bilibili {
         return Err("B站请使用官方二维码登录。".into());
     }
-    let refresh_video = input.is_some();
-    let url = if let Some(input) = input {
-        let source = sites::recognize(&input)?;
-        if source.platform != platform {
-            return Err("链接与登录平台不一致。".into());
-        }
-        source.url.parse().map_err(|_| "视频链接无效。")?
-    } else {
-        platform.home().parse().unwrap()
-    };
+    let url = platform.home().parse().unwrap();
     let label = format!("official-{}", platform.key());
     if let Some(window) = app.get_webview_window(&label) {
-        if refresh_video || window.url().ok().as_ref() != Some(&url) {
-            window.navigate(url).map_err(|_| "无法打开视频页面。")?;
-        }
         let _ = window.show();
         let _ = window.set_focus();
         return Ok(());
@@ -289,26 +302,50 @@ pub fn open_official(
         .join("official-profiles")
         .join(platform.key());
     std::fs::create_dir_all(&directory).map_err(|_| "官方网页会话目录不可用。")?;
-    let observe = platform == Platform::Douyin;
-    let initial = if observe {
-        "about:blank".parse().unwrap()
-    } else {
-        url.clone()
-    };
-    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(initial))
+    WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
         .title(format!(
-            "{}官方页面 · 播放后关闭窗口返回 SnowDown",
+            "{}官方登录 · 登录后关闭窗口保存登录状态",
             platform.label()
         ))
         .inner_size(1100.0, 780.0)
         .min_inner_size(800.0, 600.0)
         .data_directory(directory)
         .build()
-        .map_err(|e| format!("无法打开官方页面：{e}"))?;
-    if observe {
-        crate::web_capture::attach(&window, url)?;
-    }
+        .map_err(|e| format!("无法打开官方登录：{e}"))?;
     Ok(())
+}
+
+fn open_parser(app: &AppHandle, source: &sites::Source) -> Result<tauri::WebviewWindow, String> {
+    let label = format!("resolver-{}", source.platform.key());
+    let destination = source.url.parse().map_err(|_| "视频链接无效。")?;
+    if let Some(window) = app.get_webview_window(&label) {
+        window
+            .navigate(destination)
+            .map_err(|_| "无法读取视频链接。")?;
+        return Ok(window);
+    }
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "应用数据目录不可用。")?
+        .join("official-profiles")
+        .join(source.platform.key());
+    std::fs::create_dir_all(&directory).map_err(|_| "平台登录目录不可用。")?;
+    let window = WebviewWindowBuilder::new(
+        app,
+        label,
+        WebviewUrl::External("about:blank".parse().unwrap()),
+    )
+    .title("SnowDown 后台解析")
+    .inner_size(1100.0, 780.0)
+    .visible(false)
+    .focused(false)
+    .skip_taskbar(true)
+    .data_directory(directory)
+    .build()
+    .map_err(|_| "后台解析组件启动失败。")?;
+    crate::web_capture::attach(&window, destination)?;
+    Ok(window)
 }
 
 fn diagnostics_path() -> Option<PathBuf> {
@@ -338,7 +375,7 @@ async fn read_video(
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_else(|| serde_json::json!({}));
-        let window = app.get_webview_window(&format!("official-{}", source.platform.key()));
+        let window = app.get_webview_window(&format!("resolver-{}", source.platform.key()));
         let actual = window.as_ref().and_then(|w| w.url().ok());
         diagnostic["windowExists"] = window.is_some().into();
         diagnostic["pageHost"] = actual
@@ -375,12 +412,12 @@ async fn read_video_inner(
         return result;
     }
     let window = app
-        .get_webview_window(&format!("official-{}", source.platform.key()))
-        .ok_or("未打开官方窗口。")?;
+        .get_webview_window(&format!("resolver-{}", source.platform.key()))
+        .ok_or("后台解析组件未启动。")?;
     let current = sites::recognize(window.url().map_err(|_| "无法读取官方页面。")?.as_str())?;
     if current.platform != source.platform || sites::video_id(&current)? != sites::video_id(source)?
     {
-        return Err("官方窗口不是当前视频。".into());
+        return Err("后台页面尚未加载输入链接对应的视频。".into());
     }
     let script = include_str!("site_video.js").replace(
         "__VIDEO_ID__",
@@ -468,177 +505,6 @@ pub async fn capture(app: &AppHandle, platform: Platform) -> Result<String, Stri
         .map(|cookie| format!("{}={}", cookie.name(), cookie.value()))
         .collect::<Vec<_>>()
         .join("; "))
-}
-
-#[cfg(debug_assertions)]
-pub fn start_debug_probe(app: AppHandle) {
-    let Ok(input) = std::env::var("SNOWDOWN_TEST_SOURCE") else {
-        return;
-    };
-    let Ok(source) = sites::recognize(&input) else {
-        return;
-    };
-    if source.platform == Platform::Bilibili {
-        return;
-    }
-    tauri::async_runtime::spawn(async move {
-        if open_official(&app, source.platform, Some(source.url.clone())).is_err() {
-            return;
-        }
-        for _ in 0..45 {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            if let Ok(resolved) = read_video(&app, &source, 0).await {
-                if std::env::var_os("SNOWDOWN_VERIFY_RETURN").is_some() {
-                    if let Some(window) =
-                        app.get_webview_window(&format!("official-{}", source.platform.key()))
-                    {
-                        let _ = window.close();
-                    }
-                    tokio::time::sleep(Duration::from_secs(8)).await;
-                    if let Some(window) = app.get_webview_window("main") {
-                        let (sender, receiver) = tokio::sync::oneshot::channel();
-                        let sender = Mutex::new(Some(sender));
-                        let title = serde_json::to_string(&resolved.info.title).unwrap();
-                        let script = format!("JSON.stringify({{modalVisible:!!document.querySelector('.video-modal'),titleMatches:document.querySelector('.video-modal')?.textContent.includes({title})??false,qualityVisible:!!document.querySelector('.video-modal .ui-select'),downloadVisible:!!document.querySelector('.video-modal .modal-footer button')}})");
-                        let _ = window.eval_with_callback(script, move |value| {
-                            if let Some(sender) = sender.lock().unwrap().take() {
-                                let _ = sender.send(value);
-                            }
-                        });
-                        if let Ok(Ok(raw)) =
-                            tokio::time::timeout(Duration::from_secs(5), receiver).await
-                        {
-                            let value = serde_json::from_str::<serde_json::Value>(&raw)
-                                .ok()
-                                .and_then(|value| value.as_str().map(str::to_owned))
-                                .unwrap_or(raw);
-                            let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                                .join("../.tools/v012-return-verification.json");
-                            let _ = tokio::fs::write(path, value).await;
-                        }
-                    }
-                }
-                if std::env::var_os("SNOWDOWN_VERIFY_MEDIA").is_some() {
-                    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                        .join("../.tools/samples/douyin-validation.mp4");
-                    let _ = tokio::fs::remove_file(&path).await;
-                    let log = diagnostics_path().unwrap();
-                    let _ = tokio::fs::write(
-                        &log,
-                        b"{\"stage\":\"downloading\",\"parseSuccess\":true}",
-                    )
-                    .await;
-                    if let Ok(client) = crate::engine::media_client(source.platform) {
-                        let cancel = std::sync::atomic::AtomicBool::new(false);
-                        match crate::engine::transfer(
-                            &client,
-                            &resolved.url,
-                            &path,
-                            &cancel,
-                            0,
-                            |_, _, _| {},
-                        )
-                        .await
-                        {
-                            Ok(bytes) => {
-                                let mut bytes = bytes;
-                                let mut verified_path = path.clone();
-                                if let Some(audio_url) = &resolved.audio_url {
-                                    let audio_path = path.with_extension("audio.part");
-                                    let _ = tokio::fs::remove_file(&audio_path).await;
-                                    if let Ok(received) = crate::engine::transfer(
-                                        &client,
-                                        audio_url,
-                                        &audio_path,
-                                        &cancel,
-                                        0,
-                                        |_, _, _| {},
-                                    )
-                                    .await
-                                    {
-                                        bytes += received;
-                                        verified_path = path.with_file_name("douyin-verified.mp4");
-                                        let args = [
-                                            "-nostdin",
-                                            "-y",
-                                            "-hide_banner",
-                                            "-loglevel",
-                                            "error",
-                                            "-i",
-                                        ]
-                                        .into_iter()
-                                        .map(str::to_string)
-                                        .chain([
-                                            path.to_string_lossy().to_string(),
-                                            "-i".into(),
-                                            audio_path.to_string_lossy().to_string(),
-                                            "-map".into(),
-                                            "0:v:0".into(),
-                                            "-map".into(),
-                                            "1:a:0".into(),
-                                            "-c".into(),
-                                            "copy".into(),
-                                            "-movflags".into(),
-                                            "+faststart".into(),
-                                            verified_path.to_string_lossy().to_string(),
-                                        ])
-                                        .collect::<Vec<_>>();
-                                        let _ = crate::engine::run_ffmpeg(
-                                            &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                                                .join("resources/ffmpeg.exe"),
-                                            &args,
-                                            &cancel,
-                                        )
-                                        .await;
-                                    }
-                                }
-                                let mut command = tokio::process::Command::new(
-                                    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                                        .join("resources/ffprobe.exe"),
-                                );
-                                command
-                                    .args([
-                                        "-v",
-                                        "error",
-                                        "-show_entries",
-                                        "stream=codec_type:format=duration",
-                                        "-of",
-                                        "json",
-                                    ])
-                                    .arg(&verified_path);
-                                #[cfg(windows)]
-                                command.creation_flags(0x08000000);
-                                let output = command.output().await;
-                                let metadata = output
-                                    .ok()
-                                    .and_then(|o| {
-                                        serde_json::from_slice::<serde_json::Value>(&o.stdout).ok()
-                                    })
-                                    .unwrap_or_default();
-                                let streams = metadata["streams"].as_array();
-                                let video = streams
-                                    .is_some_and(|s| s.iter().any(|s| s["codec_type"] == "video"));
-                                let audio = streams
-                                    .is_some_and(|s| s.iter().any(|s| s["codec_type"] == "audio"));
-                                let result = serde_json::json!({"stage":"downloaded","bytes":bytes,"hasVideo":video,"hasAudio":audio,"duration":metadata["format"]["duration"],"success":video&&audio});
-                                let _ =
-                                    tokio::fs::write(&log, serde_json::to_vec(&result).unwrap())
-                                        .await;
-                            }
-                            Err(_) => {
-                                let _ = tokio::fs::write(
-                                    &log,
-                                    b"{\"stage\":\"download-failed\",\"parseSuccess\":true}",
-                                )
-                                .await;
-                            }
-                        }
-                    }
-                }
-                break;
-            }
-        }
-    });
 }
 
 #[cfg(test)]

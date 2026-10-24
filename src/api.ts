@@ -11,7 +11,7 @@ export async function getSnapshot(): Promise<AppSnapshot> {
     tasks: [],
     settings: { downloadDir: '', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
     siteSessions: [],
-    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.2',
+    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.3',
   }
   return invoke('get_snapshot')
 }
@@ -46,16 +46,16 @@ export async function cancelLogin(): Promise<void> { if (desktop) await invoke('
 export async function logout(): Promise<void> { requireDesktop(); await invoke('logout') }
 export async function checkLogin(): Promise<void> { requireDesktop(); await invoke('check_login') }
 export async function readClipboardLink(): Promise<SourceLink | null> { requireDesktop(); return invoke('read_clipboard_link') }
-export async function openSiteSession(platform: Platform, input?: string): Promise<void> { requireDesktop(); await invoke('open_site_session', { platform, input: input ?? null }) }
+export async function openSiteSession(platform: Platform): Promise<void> { requireDesktop(); await invoke('open_site_session', { platform }) }
 export async function captureSiteSession(platform: Platform): Promise<void> { requireDesktop(); await invoke('capture_site_session', { platform }) }
 export async function clearSiteSession(platform: Platform): Promise<void> { requireDesktop(); await invoke('clear_site_session', { platform }) }
 export async function watchFocus(callback: () => void): Promise<() => void> {
   if (!desktop) return () => {}
   return getCurrentWindow().onFocusChanged(({ payload }) => { if (payload) callback() })
 }
-export async function watchSiteReturn(callback: (platform: Platform, input?: string) => void): Promise<() => void> {
+export async function watchSiteReturn(callback: (platform: Platform, saved: boolean, error?: string) => void): Promise<() => void> {
   if (!desktop) return () => {}
-  return listen<{ platform: Platform; input: string | null }>('snowdown://site-return', ({ payload }) => callback(payload.platform, payload.input ?? undefined))
+  return listen<{ platform: Platform; saved: boolean; error: string | null }>('snowdown://site-return', ({ payload }) => callback(payload.platform, payload.saved, payload.error ?? undefined))
 }
 
 export async function windowAction(action: 'minimize' | 'maximize' | 'close'): Promise<void> {

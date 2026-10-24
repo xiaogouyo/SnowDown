@@ -1,6 +1,8 @@
 mod auth;
 mod bilibili;
 mod clipboard;
+#[cfg(debug_assertions)]
+mod debug_probe;
 mod engine;
 mod model;
 mod site_sessions;
@@ -100,12 +102,8 @@ fn read_clipboard_link(window: tauri::WebviewWindow) -> Result<Option<sites::Sou
 }
 
 #[tauri::command]
-async fn open_site_session(
-    app: AppHandle,
-    platform: Platform,
-    input: Option<String>,
-) -> Result<(), String> {
-    site_sessions::open_official(&app, platform, input)
+async fn open_site_session(app: AppHandle, platform: Platform) -> Result<(), String> {
+    site_sessions::open_official(&app, platform)
 }
 
 #[tauri::command]
@@ -440,7 +438,7 @@ pub fn run() {
             });
             app.manage(state.clone());
             #[cfg(debug_assertions)]
-            site_sessions::start_debug_probe(handle.clone());
+            debug_probe::start(handle.clone());
             let show = MenuItem::with_id(app, "show", "打开 SnowDown", true, None::<&str>)?;
             let folder = MenuItem::with_id(app, "folder", "打开下载目录", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出 SnowDown", true, None::<&str>)?;
@@ -493,7 +491,6 @@ pub fn run() {
                 } {
                     api.prevent_close();
                     let handle = window.app_handle().clone();
-                    let input = handle.get_webview_window(window.label()).and_then(|page| page.url().ok()).and_then(|url| sites::recognize(url.as_str()).ok()).map(|source| source.url);
                     if let Some(page) = handle.get_webview_window(window.label()) {
                         let _ = page.eval("document.querySelectorAll('video,audio').forEach(media => media.pause())");
                     }
@@ -501,11 +498,12 @@ pub fn run() {
                     show_main(&handle);
                     let state = handle.state::<Arc<AppState>>().inner().clone();
                     tauri::async_runtime::spawn(async move {
-                        if let Ok(cookie) = site_sessions::capture(&handle, platform).await {
-                            let _ = state.site_sessions.save(platform, cookie);
-                        }
+                        let saved = match site_sessions::capture(&handle, platform).await {
+                            Ok(cookie) => state.site_sessions.save(platform, cookie),
+                            Err(error) => Err(error),
+                        };
                         state.emit(&handle);
-                        let _ = handle.emit("snowdown://site-return", serde_json::json!({"platform":platform,"input":input}));
+                        let _ = handle.emit_to("main", "snowdown://site-return", serde_json::json!({"platform":platform,"saved":saved.is_ok(),"error":saved.err()}));
                     });
                 }
             }

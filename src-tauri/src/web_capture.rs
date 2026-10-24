@@ -31,15 +31,20 @@ fn detail_source(input: &str) -> Option<sites::Source> {
 #[cfg(windows)]
 pub fn attach(window: &WebviewWindow, destination: Url) -> Result<(), String> {
     use webview2_com::{
-        CoTaskMemPWSTR, Microsoft::Web::WebView2::Win32::ICoreWebView2_2,
+        CoTaskMemPWSTR,
+        Microsoft::Web::WebView2::Win32::{ICoreWebView2_2, ICoreWebView2_8},
         WebResourceResponseReceivedEventHandler, WebResourceResponseViewGetContentCompletedHandler,
     };
     use windows::core::{Interface, PWSTR};
     let app = window.app_handle().clone();
+    let label = window.label().to_owned();
     window
         .with_webview(move |webview| unsafe {
             let installed = (|| -> windows::core::Result<()> {
                 let core = webview.controller().CoreWebView2()?;
+                if let Ok(audio) = core.cast::<ICoreWebView2_8>() {
+                    audio.SetIsMuted(true)?;
+                }
                 let events = core.cast::<ICoreWebView2_2>()?;
                 let callback_app = app.clone();
                 let handler =
@@ -102,7 +107,7 @@ pub fn attach(window: &WebviewWindow, destination: Url) -> Result<(), String> {
                 Ok(())
             })();
             if installed.is_err() {
-                if let Some(window) = app.get_webview_window("official-douyin") {
+                if let Some(window) = app.get_webview_window(&label) {
                     let _ = window.navigate(destination);
                 }
             }

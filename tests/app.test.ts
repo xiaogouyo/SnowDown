@@ -12,7 +12,7 @@ vi.mock('../src/api', () => ({ ...api, __v_isRef: false }))
 
 const initial: AppSnapshot = {
   tasks: [], settings: { downloadDir: 'D:\\视频', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
-  siteSessions: [], mediaReady: true, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.2',
+  siteSessions: [], mediaReady: true, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.3',
 }
 const video: VideoInfo = {
   platform: 'bilibili', sourceUrl: 'https://www.bilibili.com/video/BV1xx411c7mD',
@@ -38,38 +38,60 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); vi.useRealTimers() })
 
 describe('desktop download flow', () => {
-  it('parses the actual returned official video instead of an unrelated existing input', async () => {
-    await flushPromises()
-    await wrapper.get('input[aria-label="视频链接"]').setValue('https://www.douyin.com/video/9876543210987654321')
-    api.watchSiteReturn.mock.calls[0]![0]('douyin', 'https://www.douyin.com/video/1234567890123456789')
-    await flushPromises()
-    expect(api.inspectVideo).toHaveBeenCalledWith('https://www.douyin.com/video/1234567890123456789')
-  })
-  it('preserves a link edited after opening the official page and offers its returned video', async () => {
+  it('keeps the entered link and does not parse when login returns', async () => {
     await flushPromises()
     const source = 'https://www.douyin.com/video/1234567890123456789'
     await wrapper.get('input[aria-label="视频链接"]').setValue(source)
-    await wrapper.get('.link-card-footer .text-button').trigger('click')
-    await wrapper.get('input[aria-label="视频链接"]').setValue('BV1xx411c7mD')
-    api.watchSiteReturn.mock.calls[0]![0]('douyin', source)
+    api.watchSiteReturn.mock.calls[0]![0]('douyin', true)
     await flushPromises()
-    expect((wrapper.get('input[aria-label="视频链接"]').element as HTMLInputElement).value).toBe('BV1xx411c7mD')
-    expect(wrapper.get('.clipboard-suggestion').text()).toContain('识别到抖音')
+    expect((wrapper.get('input[aria-label="视频链接"]').element as HTMLInputElement).value).toBe(source)
     expect(api.inspectVideo).not.toHaveBeenCalled()
-  })
-  it('fills an empty input from the official video page when returning', async () => {
+    expect(wrapper.find('.video-modal').exists()).toBe(false)
+    await wrapper.get('.link-form').trigger('submit')
     await flushPromises()
-    api.watchSiteReturn.mock.calls[0]![0]('douyin', 'https://www.douyin.com/video/1234567890123456789')
-    await flushPromises()
-    expect(api.inspectVideo).toHaveBeenCalledWith('https://www.douyin.com/video/1234567890123456789')
+    expect(api.inspectVideo).toHaveBeenCalledWith(source)
   })
-  it('retries the current source automatically when its official page returns', async () => {
+  it('keeps an empty input after login and reports save failures', async () => {
+    await flushPromises()
+    api.watchSiteReturn.mock.calls[0]![0]('douyin', false, '读取登录状态超时')
+    await flushPromises()
+    expect((wrapper.get('input[aria-label="视频链接"]').element as HTMLInputElement).value).toBe('')
+    expect(api.inspectVideo).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="status"]').text()).toContain('读取登录状态超时')
+  })
+  it('opens login without sending the download link and preserves later edits', async () => {
     await flushPromises()
     await wrapper.get('input[aria-label="视频链接"]').setValue('https://www.douyin.com/video/1234567890123456789')
-    api.watchSiteReturn.mock.calls[0]![0]('douyin')
+    await wrapper.get('.link-card-footer .text-button').trigger('click')
+    expect(api.openSiteSession).toHaveBeenCalledWith('douyin')
+    await wrapper.get('input[aria-label="视频链接"]').setValue('BV1xx411c7mD')
+    api.watchSiteReturn.mock.calls[0]![0]('douyin', true)
     await flushPromises()
-    expect(api.inspectVideo).toHaveBeenCalledWith('https://www.douyin.com/video/1234567890123456789')
-    expect(wrapper.find('.video-modal').exists()).toBe(true)
+    expect((wrapper.get('input[aria-label="视频链接"]').element as HTMLInputElement).value).toBe('BV1xx411c7mD')
+    expect(api.inspectVideo).not.toHaveBeenCalled()
+  })
+  it('saves login from settings without retrying or closing the settings', async () => {
+    await flushPromises()
+    await wrapper.get('input[aria-label="视频链接"]').setValue('https://www.douyin.com/video/1234567890123456789')
+    await wrapper.get('.profile').trigger('click')
+    await wrapper.get('.site-login-actions .primary').trigger('click')
+    await flushPromises()
+    expect(api.captureSiteSession).toHaveBeenCalledWith('douyin')
+    expect(api.inspectVideo).not.toHaveBeenCalled()
+    expect(wrapper.find('.settings-modal').exists()).toBe(true)
+  })
+  it('does not auto parse clipboard content when focusing back from login', async () => {
+    await flushPromises(); wrapper.unmount()
+    const enabled = structuredClone(initial); enabled.settings.clipboardAutoParse = true
+    api.getSnapshot.mockResolvedValue(enabled)
+    wrapper = mount(App); await flushPromises()
+    await wrapper.get('input[aria-label="视频链接"]').setValue('https://www.douyin.com/video/1234567890123456789')
+    await wrapper.get('.link-card-footer .text-button').trigger('click')
+    api.readClipboardLink.mockClear()
+    api.watchFocus.mock.calls.at(-1)![0]()
+    await flushPromises()
+    expect(api.readClipboardLink).not.toHaveBeenCalled()
+    expect(api.inspectVideo).not.toHaveBeenCalled()
   })
   it('pastes and parses a recognized platform in one action', async () => {
     await flushPromises()
@@ -106,14 +128,14 @@ describe('desktop download flow', () => {
     expect(api.inspectVideo).not.toHaveBeenCalled()
   })
 
-  it('opens the detected video in its own official platform session', async () => {
+  it('opens official login for the selected platform without a video URL', async () => {
     await flushPromises()
     const source = 'https://www.douyin.com/video/1234567890123456789'
     await wrapper.get('input[aria-label="视频链接"]').setValue(source)
     await wrapper.get('.profile').trigger('click')
     expect(wrapper.get('.account-platform-tabs .active').text()).toBe('抖音')
     await wrapper.get('.site-login-actions .secondary').trigger('click')
-    expect(api.openSiteSession).toHaveBeenCalledWith('douyin', source)
+    expect(api.openSiteSession).toHaveBeenCalledWith('douyin')
   })
 
   it('starts with a real empty queue and disables empty bulk actions', async () => {

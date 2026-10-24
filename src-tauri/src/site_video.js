@@ -1,4 +1,4 @@
-// Runs only on a dedicated official platform window. Return media metadata for
+// Runs only on the app's hidden parser. Return media metadata for
 // the requested video, never form values, credentials, or unrelated page state.
 (() => {
   const id = __VIDEO_ID__;
@@ -32,6 +32,7 @@
     video: { width: detail.video.width, height: detail.video.height,
       duration: detail.video.duration, cover: detail.video.cover,
       bit_rate: detail.video.bit_rate, play_addr: detail.video.play_addr,
+      bit_rate_audio: detail.video.bit_rate_audio,
       play_addr_h264: detail.video.play_addr_h264, play_addr_bytevc1: detail.video.play_addr_bytevc1 }
   };
   const visible = Array.from(document.querySelectorAll('video')).filter(video => {

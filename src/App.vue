@@ -31,7 +31,7 @@ let lastClipboard = ''
 let unwatchFocus: (() => void) | undefined
 let unwatchSiteReturn: (() => void) | undefined
 let checkingClipboard = false
-let openedOfficialSource: SourceLink | null = null
+let siteLoginActive = false
 const detectedSource = computed(() => identifySource(link.value))
 const platformList: Platform[] = ['bilibili', 'douyin', 'xiaohongshu']
 const filterOptions = [{ value: 'all', label: '全部状态' }, { value: 'downloading', label: '进行中' }, { value: 'paused', label: '已暂停' }, { value: 'failed', label: '失败' }]
@@ -109,7 +109,7 @@ function onPaste(event: ClipboardEvent) {
 }
 
 async function checkClipboard() {
-  if (checkingClipboard || !api.desktop || !snapshot.value?.settings.clipboardEnabled || analyzing.value || submitting.value || video.value || dialog.value) return
+  if (checkingClipboard || siteLoginActive || !api.desktop || !snapshot.value?.settings.clipboardEnabled || analyzing.value || submitting.value || video.value || dialog.value) return
   checkingClipboard = true
   try {
     const source = await api.readClipboardLink()
@@ -131,38 +131,27 @@ async function parseClipboardSuggestion() {
 function setFilter(value: string | number) { filter.value = String(value) as typeof filter.value }
 
 async function openSiteLogin() {
-  const source = detectedSource.value?.platform === accountPlatform.value ? detectedSource.value : null
-  openedOfficialSource = source
-  try { await api.openSiteSession(accountPlatform.value, source?.url); notify('在官方页面完成登录或验证并播放视频，关闭该窗口后会返回软件自动解析。') }
-  catch (error) { openedOfficialSource = null; notify(errorMessage(error), 'error') }
+  await openPlatformLogin(accountPlatform.value)
 }
 
-async function parseOfficialPage() {
+async function openSourceLogin() {
   const source = detectedSource.value
   if (!source || source.platform === 'bilibili') return
-  openedOfficialSource = source
-  try {
-    await api.openSiteSession(source.platform, source.url)
-    notify('在官方页面完成登录或验证并播放视频，关闭该窗口后会返回软件自动解析。')
-  } catch (error) { openedOfficialSource = null; notify(errorMessage(error), 'error') }
+  await openPlatformLogin(source.platform)
 }
 
-async function onSiteReturn(platform: Platform, input?: string) {
-  const opened = openedOfficialSource
-  openedOfficialSource = null
-  const returned = input ? identifySource(input) : null
-  if (submitting.value || video.value) return
-  if (returned?.platform === platform) {
-    if (opened && link.value.trim() && detectedSource.value?.url !== opened.url) {
-      clipboardSuggestion.value = returned
-      notify('官方页面的视频已就绪，点击链接提示即可解析。')
-      return
-    }
-    link.value = returned.url
-  }
-  if (detectedSource.value?.platform !== platform || analyzing.value) return
-  dialog.value = null
-  await analyze()
+async function openPlatformLogin(platform: Platform) {
+  siteLoginActive = true
+  try {
+    await api.openSiteSession(platform)
+    notify('请在官方窗口完成登录或验证，关闭窗口后保存登录状态，再点击“解析视频”。')
+  } catch (error) { siteLoginActive = false; notify(errorMessage(error), 'error') }
+}
+
+async function onSiteReturn(platform: Platform, saved: boolean, error?: string) {
+  siteLoginActive = false
+  try { snapshot.value = await api.getSnapshot() } catch { /* State events also refresh session status. */ }
+  notify(saved ? `${platformLabels[platform]}登录状态已保存，请点击“解析视频”。` : error ?? '登录状态保存失败，请在平台账号中重试。', saved ? 'success' : 'error')
 }
 
 async function saveSiteSession(clear = false) {
@@ -172,7 +161,6 @@ async function saveSiteSession(clear = false) {
     else await api.captureSiteSession(accountPlatform.value)
     snapshot.value = await api.getSnapshot()
     notify(clear ? '已清除软件保存的此平台会话。' : '官方网页会话已加密保存。', 'success')
-    if (!clear && detectedSource.value?.platform === accountPlatform.value) { dialog.value = null; await analyze() }
   } catch (error) { notify(errorMessage(error), 'error') }
   finally { savingSettings.value = false }
 }
@@ -309,7 +297,7 @@ onMounted(async () => {
     snapshot.value = await api.getSnapshot()
     unwatchWindow = await api.watchMaximized(value => { maximized.value = value })
     unwatchFocus = await api.watchFocus(() => { void checkClipboard() })
-    unwatchSiteReturn = await api.watchSiteReturn((platform, input) => { void onSiteReturn(platform, input) })
+    unwatchSiteReturn = await api.watchSiteReturn((platform, saved, error) => { void onSiteReturn(platform, saved, error) })
     await checkClipboard()
   } catch (error) { notify(`初始化失败：${errorMessage(error)}`, 'error') }
 })
@@ -376,7 +364,7 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); unwatc
             <button class="paste-button" type="button" title="读取剪贴板并解析 · Ctrl+Shift+V" :disabled="analyzing" @click="paste"><ClipboardPaste :size="15" /><span>粘贴并解析</span></button>
             <button class="button primary analyze-button" type="submit" :disabled="analyzing"><LoaderCircle v-if="analyzing" :size="16" class="spin" /><Download v-else :size="16" />{{ analyzing ? '正在解析' : '解析视频' }}</button>
           </form>
-          <div class="link-card-footer"><span v-if="detectedSource" class="recognized-source"><CircleCheck :size="13" />已识别{{ platformLabels[detectedSource.platform] }}<small>{{ sourceSummary(detectedSource) }}</small></span><span v-else><Check :size="13" />自动识别平台 · 支持分享短链接</span><button v-if="detectedSource && detectedSource.platform !== 'bilibili'" class="text-button" @click="parseOfficialPage">官方页面解析</button><span class="shortcut-tip"><kbd>Ctrl Shift V</kbd> 粘贴并解析 · <kbd>Enter</kbd> 解析</span></div>
+          <div class="link-card-footer"><span v-if="detectedSource" class="recognized-source"><CircleCheck :size="13" />已识别{{ platformLabels[detectedSource.platform] }}<small>{{ sourceSummary(detectedSource) }}</small></span><span v-else><Check :size="13" />自动识别平台 · 支持分享短链接</span><button v-if="detectedSource && detectedSource.platform !== 'bilibili'" class="text-button" @click="openSourceLogin">登录{{ platformLabels[detectedSource.platform] }}</button><span class="shortcut-tip"><kbd>Ctrl Shift V</kbd> 粘贴并解析 · <kbd>Enter</kbd> 解析</span></div>
           <div v-if="clipboardSuggestion" class="clipboard-suggestion"><ClipboardPaste :size="15" /><span>剪贴板识别到{{ platformLabels[clipboardSuggestion.platform] }}链接</span><button class="text-button" @click="parseClipboardSuggestion">立即解析<ArrowUpRight :size="13" /></button><button class="icon-button" aria-label="忽略剪贴板链接" @click="clipboardSuggestion = null"><X :size="14" /></button></div>
         </section>
 
@@ -433,7 +421,7 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); unwatc
         <div class="workspace-note"><span class="note-icon"><ShieldCheck :size="16" /></span><div><strong>安心收藏，文件始终在你手中</strong><p>视频直接保存到本地。关闭窗口后，SnowDown 会在系统托盘继续下载。</p></div><span class="note-decoration"><Snowflake :size="33" :stroke-width="1" /></span></div>
       </main>
 
-      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="dialog = 'about'">v{{ snapshot?.version ?? '0.1.2' }}</button></div></footer>
+      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="dialog = 'about'">v{{ snapshot?.version ?? '0.1.3' }}</button></div></footer>
     </div>
 
     <Transition name="toast"><div v-if="toast" :class="['toast-message', toast.type]" role="status"><CircleAlert v-if="toast.type === 'error'" :size="18" /><CircleCheck v-else-if="toast.type === 'success'" :size="18" /><Info v-else :size="18" /><span>{{ toast.text }}</span><button aria-label="关闭提示" @click="toast = null"><X :size="15" /></button></div></Transition>
@@ -499,8 +487,8 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); unwatc
             <div class="account-illustration"><UserRound :size="25" /></div>
             <h3>{{ platformLabels[accountPlatform] }}官方网页会话</h3>
             <span v-if="siteSessionSaved" class="login-saved"><ShieldCheck :size="14" />已加密保存网页会话</span>
-            <p>打开官方页面并播放当前视频，关闭该窗口后会返回软件自动解析。也可切回这里手动保存会话。各平台账号分别保存。</p>
-            <div class="site-login-actions"><button class="button secondary" @click="openSiteLogin"><ExternalLink :size="15" />打开官方页面</button><button class="button primary" :disabled="savingSettings" @click="saveSiteSession()"><ShieldCheck :size="15" />{{ detectedSource?.platform === accountPlatform ? '保存会话并重试' : '保存网页会话' }}</button></div>
+            <p>在官方窗口完成登录或验证，关闭窗口后保存登录状态。下载时粘贴链接并点击“解析视频”，结果会显示在软件内。各平台账号分别保存。</p>
+            <div class="site-login-actions"><button class="button secondary" @click="openSiteLogin"><ExternalLink :size="15" />打开官方登录</button><button class="button primary" :disabled="savingSettings" @click="saveSiteSession()"><ShieldCheck :size="15" />保存登录状态</button></div>
             <button v-if="siteSessionSaved" class="text-button clear-site-session" :disabled="savingSettings" @click="saveSiteSession(true)">清除软件保存的此平台会话</button>
             <div class="login-privacy"><ShieldCheck :size="16" /><span>各平台会话分别加密保存，失效后可更新。官方网页中的账号可在该页面退出；清除软件会话不会替你操作官方账号。</span></div>
           </template>
@@ -509,6 +497,6 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); unwatc
       </section>
     </div>
 
-    <div v-if="dialog === 'about'" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.2' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="dialog = null">开始收藏<ExternalLink :size="14" /></button></section></div>
+    <div v-if="dialog === 'about'" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.3' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="dialog = null">开始收藏<ExternalLink :size="14" /></button></section></div>
   </div>
 </template>

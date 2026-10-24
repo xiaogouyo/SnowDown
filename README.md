@@ -2,11 +2,11 @@
 
 Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红书视频。采用 Tauri 2、Vue 3、TypeScript 与 Rust，下载文件在本机处理和保存。
 
-## 下载 v0.1.2
+## 下载 v0.1.3
 
-- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.2/SnowDown_0.1.2_x64-setup.exe)
-- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.2/SnowDown_0.1.2_Windows_x64_portable.zip)
-- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.1.2)
+- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.3/SnowDown_0.1.3_x64-setup.exe)
+- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.3/SnowDown_0.1.3_Windows_x64_portable.zip)
+- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.1.3)
 
 需要 Windows 10/11 x64 和 WebView2 运行时。免安装版请完整解压后启动，保留 `resources` 文件夹。下载文件的 SHA256 校验值随 Release 提供。
 
@@ -22,7 +22,7 @@ Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红�
 - 可选保存封面、XML弹幕、SRT字幕；附加资源不可用不影响已下载的视频。
 - 系统托盘、单实例、打开下载目录与定位文件。
 - B站官方二维码登录，在手机B站确认；Windows DPAPI 加密保存会话，重启自动恢复，退出账号清除本机凭据。
-- 抖音、小红书通过软件内的官方网页登录；分别加密保存网页会话。播放后关闭官方窗口，会返回软件自动解析；抖音支持分离音视频流合并。
+- 抖音、小红书通过软件内的官方网页登录；分别加密保存网页会话。官方窗口仅用于登录，关闭后保存状态；输入链接并点击“解析视频”后在软件内选择下载。抖音支持分离音视频流合并。
 - 状态、画质、并发数统一使用软件内的下拉菜单；长链接不会挤压操作按钮，设置操作区保持可见。
 - 与顶部栏融为一体的窗口按钮，支持拖动、双击最大化与关闭到托盘。
 - 二次元异形安装界面，透明立绘、曲面面板、安装路径选择与真实安装阶段提示。
@@ -39,7 +39,7 @@ Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红�
 
 登录：打开“设置 → 平台账号 → B站”，获取官方二维码，使用手机B站扫描并确认。凭据只由 Rust 后端接收，不返回网页界面；加密文件位于当前用户应用数据目录 `app.snowdown.desktop/bilibili-session.dat`，仅当前 Windows 用户可解密。启动时验证会话，临时断网会保留登录状态；B站会话失效后提示重新扫码。
 
-抖音、小红书遇到访问限制时，点击链接下方“官方页面解析”，由你完成登录或验证，并播放当前视频。关闭官方窗口会暂停播放、返回软件并自动解析；也可在“设置 → 平台账号”手动保存会话。应用只读取自己官方窗口的会话，独立网页资料位于 `official-profiles/<平台>`，加密导入会话位于 `site-sessions/<平台>.dat`；不会读取外部浏览器账号。清除导入会话后，官方窗口中的账号仍需在平台页面自行退出。会话有有效期，限制访问的内容不能保证可下载。
+抖音、小红书遇到访问限制时，点击链接下方的平台登录按钮，由你在官方窗口完成登录或验证。关闭窗口后保存登录状态，也可在“设置 → 平台账号”手动保存；输入框中的链接不会改变，点击“解析视频”才解析下载来源。软件会在后台复用自己的平台登录资料读取目标视频，正常解析不需要手动打开网页播放。应用只读取自己官方窗口的会话，独立网页资料位于 `official-profiles/<平台>`，加密导入会话位于 `site-sessions/<平台>.dat`；不会读取外部浏览器账号。清除导入会话后，官方窗口中的账号仍需在平台页面自行退出。会话有有效期，限制访问的内容不能保证可下载。
 
 剪贴板仅在主窗口聚焦时检查，后端只返回识别到的平台链接；不会保存其他剪贴板内容。必要的分享访问参数保留在本机任务来源中，界面摘要不显示这些参数。
 
