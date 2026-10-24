@@ -6,13 +6,13 @@ import type { AppSnapshot, VideoInfo } from '../src/types'
 const api = vi.hoisted(() => ({
   desktop: true, getSnapshot: vi.fn(), subscribe: vi.fn(), inspectVideo: vi.fn(),
   createTasks: vi.fn(), taskAction: vi.fn(), saveSettings: vi.fn(), beginLogin: vi.fn(), pollLogin: vi.fn(), cancelLogin: vi.fn(), logout: vi.fn(), checkLogin: vi.fn(), windowAction: vi.fn(), watchMaximized: vi.fn(),
-  chooseDirectory: vi.fn(), openDirectory: vi.fn(), readClipboardLink: vi.fn(), watchFocus: vi.fn(), watchSiteReturn: vi.fn(), openSiteSession: vi.fn(), captureSiteSession: vi.fn(), clearSiteSession: vi.fn(),
+  chooseDirectory: vi.fn(), openDirectory: vi.fn(), readClipboardLink: vi.fn(), watchFocus: vi.fn(),
 }))
 vi.mock('../src/api', () => ({ ...api, __v_isRef: false }))
 
 const initial: AppSnapshot = {
   tasks: [], settings: { downloadDir: 'D:\\视频', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
-  siteSessions: [], mediaReady: true, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.3',
+  siteSessions: [], mediaReady: true, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.4',
 }
 const video: VideoInfo = {
   platform: 'bilibili', sourceUrl: 'https://www.bilibili.com/video/BV1xx411c7mD',
@@ -26,8 +26,11 @@ beforeEach(() => {
   vi.clearAllMocks()
   api.readClipboardLink.mockResolvedValue(null)
   api.watchFocus.mockResolvedValue(() => {})
-  api.watchSiteReturn.mockResolvedValue(() => {})
   api.cancelLogin.mockResolvedValue(undefined)
+  api.logout.mockResolvedValue(undefined)
+  api.checkLogin.mockResolvedValue(undefined)
+  api.beginLogin.mockResolvedValue({ id: 'official-qr', image: 'data:image/png;base64,iVBORw0KGgo=', expiresAt: Date.now() + 120000 })
+  api.pollLogin.mockResolvedValue({ state: 'waiting' })
   api.watchMaximized.mockResolvedValue(() => {})
   api.getSnapshot.mockResolvedValue(structuredClone(initial))
   api.subscribe.mockResolvedValue(() => {})
@@ -38,60 +41,80 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); vi.useRealTimers() })
 
 describe('desktop download flow', () => {
-  it('keeps the entered link and does not parse when login returns', async () => {
+  it.each(['bilibili', 'douyin', 'xiaohongshu'] as const)('automatically refreshes %s on official expiration and stops after close', async platform => {
+    await flushPromises(); vi.useFakeTimers()
+    api.beginLogin.mockResolvedValue({id:'fresh-qr',image:'data:image/png;base64,iVBORw0KGgo=',expiresAt:Date.now()+120000})
+    api.pollLogin.mockResolvedValueOnce({state:'expired'}).mockResolvedValue({state:'waiting'})
+    await wrapper.get('.profile').trigger('click')
+    const index = ['bilibili', 'douyin', 'xiaohongshu'].indexOf(platform)
+    await wrapper.findAll('.account-platform-tabs button')[index]!.trigger('click')
+    await wrapper.get('.login-start').trigger('click'); await flushPromises()
+    await vi.advanceTimersByTimeAsync(1500); await flushPromises()
+    expect(api.beginLogin.mock.calls).toEqual([[platform],[platform]])
+    await wrapper.get('[aria-label="关闭设置"]').trigger('click'); await flushPromises()
+    const calls = api.pollLogin.mock.calls.length
+    await vi.advanceTimersByTimeAsync(15000)
+    expect(api.pollLogin).toHaveBeenCalledTimes(calls)
+    expect(api.cancelLogin).toHaveBeenLastCalledWith(platform)
+  })
+  it.each(['bilibili', 'douyin', 'xiaohongshu'] as const)('refreshes %s at its local deadline even without an expiration response', async platform => {
+    await flushPromises(); vi.useFakeTimers()
+    api.beginLogin.mockResolvedValueOnce({id:'old',image:'data:image/png;base64,iVBORw0KGgo=',expiresAt:Date.now()+1000}).mockResolvedValue({id:'new',image:'data:image/png;base64,iVBORw0KGgo=',expiresAt:Date.now()+120000})
+    await wrapper.get('.profile').trigger('click')
+    await wrapper.findAll('.account-platform-tabs button')[['bilibili','douyin','xiaohongshu'].indexOf(platform)]!.trigger('click')
+    await wrapper.get('.login-start').trigger('click'); await flushPromises()
+    await vi.advanceTimersByTimeAsync(1500); await flushPromises()
+    expect(api.beginLogin).toHaveBeenCalledTimes(2)
+    expect(api.pollLogin).not.toHaveBeenCalled()
+  })
+  it('uses a QR automatically replaced by the official page without restarting login', async () => {
+    await flushPromises(); vi.useFakeTimers()
+    api.pollLogin.mockResolvedValue({state:'waiting',qr:{id:'official-qr',image:'data:image/png;base64,bmV3',expiresAt:Date.now()+180000}})
+    await wrapper.get('.profile').trigger('click')
+    await wrapper.findAll('.account-platform-tabs button')[1]!.trigger('click')
+    await wrapper.get('.login-start').trigger('click'); await flushPromises()
+    await vi.advanceTimersByTimeAsync(1500); await flushPromises()
+    expect(wrapper.get('img[alt="抖音官方登录二维码"]').attributes('src')).toBe('data:image/png;base64,bmV3')
+    expect(api.beginLogin).toHaveBeenCalledTimes(1)
+  })
+  it('does not publish a late QR or start polling after switching platform', async () => {
+    await flushPromises(); vi.useFakeTimers()
+    let resolveQr!: (qr: unknown) => void
+    api.beginLogin.mockImplementationOnce(() => new Promise(resolve => { resolveQr=resolve }))
+    await wrapper.get('.profile').trigger('click')
+    await wrapper.get('.login-start').trigger('click'); await flushPromises()
+    await wrapper.findAll('.account-platform-tabs button')[1]!.trigger('click')
+    resolveQr({id:'late',image:'data:image/png;base64,bGF0ZQ==',expiresAt:Date.now()+120000}); await flushPromises()
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(wrapper.find('.login-qr img').exists()).toBe(false)
+    expect(api.pollLogin).not.toHaveBeenCalled()
+  })
+  it('keeps download input unchanged and does not parse when QR login confirms', async () => {
     await flushPromises()
     const source = 'https://www.douyin.com/video/1234567890123456789'
+    api.beginLogin.mockResolvedValue({id:'confirmed',image:'',expiresAt:Date.now(),state:'confirmed'})
     await wrapper.get('input[aria-label="视频链接"]').setValue(source)
-    api.watchSiteReturn.mock.calls[0]![0]('douyin', true)
-    await flushPromises()
+    await wrapper.get('.link-card-footer .text-button').trigger('click'); await flushPromises()
     expect((wrapper.get('input[aria-label="视频链接"]').element as HTMLInputElement).value).toBe(source)
     expect(api.inspectVideo).not.toHaveBeenCalled()
-    expect(wrapper.find('.video-modal').exists()).toBe(false)
-    await wrapper.get('.link-form').trigger('submit')
-    await flushPromises()
-    expect(api.inspectVideo).toHaveBeenCalledWith(source)
   })
-  it('keeps an empty input after login and reports save failures', async () => {
-    await flushPromises()
-    api.watchSiteReturn.mock.calls[0]![0]('douyin', false, '读取登录状态超时')
-    await flushPromises()
-    expect((wrapper.get('input[aria-label="视频链接"]').element as HTMLInputElement).value).toBe('')
-    expect(api.inspectVideo).not.toHaveBeenCalled()
-    expect(wrapper.get('[role="status"]').text()).toContain('读取登录状态超时')
-  })
-  it('opens login without sending the download link and preserves later edits', async () => {
-    await flushPromises()
-    await wrapper.get('input[aria-label="视频链接"]').setValue('https://www.douyin.com/video/1234567890123456789')
-    await wrapper.get('.link-card-footer .text-button').trigger('click')
-    expect(api.openSiteSession).toHaveBeenCalledWith('douyin')
-    await wrapper.get('input[aria-label="视频链接"]').setValue('BV1xx411c7mD')
-    api.watchSiteReturn.mock.calls[0]![0]('douyin', true)
-    await flushPromises()
-    expect((wrapper.get('input[aria-label="视频链接"]').element as HTMLInputElement).value).toBe('BV1xx411c7mD')
-    expect(api.inspectVideo).not.toHaveBeenCalled()
-  })
-  it('saves login from settings without retrying or closing the settings', async () => {
-    await flushPromises()
-    await wrapper.get('input[aria-label="视频链接"]').setValue('https://www.douyin.com/video/1234567890123456789')
-    await wrapper.get('.profile').trigger('click')
-    await wrapper.get('.site-login-actions .primary').trigger('click')
-    await flushPromises()
-    expect(api.captureSiteSession).toHaveBeenCalledWith('douyin')
-    expect(api.inspectVideo).not.toHaveBeenCalled()
-    expect(wrapper.find('.settings-modal').exists()).toBe(true)
-  })
-  it('does not auto parse clipboard content when focusing back from login', async () => {
+  it.each(['douyin','xiaohongshu'] as const)('shows only logout and login check for saved %s and calls the selected platform', async platform => {
     await flushPromises(); wrapper.unmount()
-    const enabled = structuredClone(initial); enabled.settings.clipboardAutoParse = true
-    api.getSnapshot.mockResolvedValue(enabled)
-    wrapper = mount(App); await flushPromises()
-    await wrapper.get('input[aria-label="视频链接"]').setValue('https://www.douyin.com/video/1234567890123456789')
-    await wrapper.get('.link-card-footer .text-button').trigger('click')
-    api.readClipboardLink.mockClear()
-    api.watchFocus.mock.calls.at(-1)![0]()
-    await flushPromises()
-    expect(api.readClipboardLink).not.toHaveBeenCalled()
-    expect(api.inspectVideo).not.toHaveBeenCalled()
+    const saved = structuredClone(initial); saved.siteSessions=[{platform,saved:true}]
+    api.getSnapshot.mockResolvedValue(saved)
+    wrapper=mount(App); await flushPromises()
+    await wrapper.get('.profile').trigger('click')
+    await wrapper.findAll('.account-platform-tabs button')[['bilibili','douyin','xiaohongshu'].indexOf(platform)]!.trigger('click')
+    expect(wrapper.findAll('.account-buttons button').map(button=>button.text())).toEqual(['退出账号','检查登录'])
+    expect(wrapper.text()).not.toContain('官方验证')
+    expect(wrapper.text()).not.toContain('重新扫码登录')
+    await wrapper.findAll('.account-buttons button')[1]!.trigger('click'); await flushPromises()
+    expect(api.checkLogin).toHaveBeenCalledWith(platform)
+    const loggedOut=structuredClone(saved); loggedOut.siteSessions=[]
+    api.getSnapshot.mockResolvedValue(loggedOut)
+    await wrapper.findAll('.account-buttons button')[0]!.trigger('click'); await flushPromises()
+    expect(api.logout).toHaveBeenCalledWith(platform)
+    expect(wrapper.find('.login-start').exists()).toBe(true)
   })
   it('pastes and parses a recognized platform in one action', async () => {
     await flushPromises()
@@ -126,16 +149,6 @@ describe('desktop download flow', () => {
     wrapper = mount(App); await flushPromises()
     expect(api.readClipboardLink).not.toHaveBeenCalled()
     expect(api.inspectVideo).not.toHaveBeenCalled()
-  })
-
-  it('opens official login for the selected platform without a video URL', async () => {
-    await flushPromises()
-    const source = 'https://www.douyin.com/video/1234567890123456789'
-    await wrapper.get('input[aria-label="视频链接"]').setValue(source)
-    await wrapper.get('.profile').trigger('click')
-    expect(wrapper.get('.account-platform-tabs .active').text()).toBe('抖音')
-    await wrapper.get('.site-login-actions .secondary').trigger('click')
-    expect(api.openSiteSession).toHaveBeenCalledWith('douyin')
   })
 
   it('starts with a real empty queue and disables empty bulk actions', async () => {
@@ -203,7 +216,7 @@ describe('desktop download flow', () => {
     expect(wrapper.get('img[alt="B站官方登录二维码"]').attributes('src')).toContain('data:image/svg+xml;')
     await vi.advanceTimersByTimeAsync(1500)
     await flushPromises()
-    expect(wrapper.get('.qr-status').text()).toContain('请在手机 B站确认')
+    expect(wrapper.get('.qr-status').text()).toContain('请在手机B站确认')
     await wrapper.get('[aria-label="关闭设置"]').trigger('click')
     await flushPromises()
     await vi.advanceTimersByTimeAsync(10000)
@@ -211,7 +224,7 @@ describe('desktop download flow', () => {
     expect(api.cancelLogin).toHaveBeenCalled()
   })
 
-  it('replaces an expired QR with a refresh action', async () => {
+  it('automatically obtains a fresh QR when Bilibili reports expiration', async () => {
     await flushPromises()
     vi.useFakeTimers()
     api.beginLogin.mockResolvedValue({ id: 'expired-qr', image: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: Date.now() + 180000 })
@@ -221,8 +234,9 @@ describe('desktop download flow', () => {
     await flushPromises()
     await vi.advanceTimersByTimeAsync(1500)
     await flushPromises()
-    expect(wrapper.get('.qr-expired button').text()).toContain('刷新二维码')
-    expect(wrapper.get('.qr-status').text()).toContain('已过期')
+    expect(api.beginLogin).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('.qr-status').text()).toContain('过期自动更新')
+    expect(wrapper.find('.qr-expired').exists()).toBe(false)
   })
 
   it('shows a saved account only after native confirmation succeeds', async () => {

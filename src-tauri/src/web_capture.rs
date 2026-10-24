@@ -135,3 +135,84 @@ mod tests {
         .is_none());
     }
 }
+
+#[cfg(windows)]
+pub async fn clear_profile(window: &WebviewWindow) -> Result<(), String> {
+    use std::sync::Mutex;
+    use webview2_com::{
+        ClearBrowsingDataCompletedHandler, CoTaskMemPWSTR,
+        Microsoft::Web::WebView2::Win32::{ICoreWebView2Profile2, ICoreWebView2_13},
+        NavigationCompletedEventHandler,
+    };
+    use windows::core::{Interface, PWSTR};
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let sender = Arc::new(Mutex::new(Some(sender)));
+    window
+        .with_webview(move |webview| unsafe {
+            let callback_sender = sender.clone();
+            let result = (|| -> windows::core::Result<()> {
+                let core = webview.controller().CoreWebView2()?;
+                core.Stop()?;
+                let token = Arc::new(Mutex::new(None));
+                let callback_token = token.clone();
+                let callback = NavigationCompletedEventHandler::create(Box::new(move |core, _| {
+                    let Some(core) = core else {
+                        return Ok(());
+                    };
+                    let mut source = PWSTR::null();
+                    core.Source(&mut source)?;
+                    if CoTaskMemPWSTR::from(source).to_string() != "about:blank" {
+                        return Ok(());
+                    }
+                    if let Some(token) = callback_token.lock().unwrap().take() {
+                        core.remove_NavigationCompleted(token)?;
+                    }
+                    let completion_sender = callback_sender.clone();
+                    let result = (|| -> windows::core::Result<()> {
+                        core.cast::<ICoreWebView2_13>()?
+                            .Profile()?
+                            .cast::<ICoreWebView2Profile2>()?
+                            .ClearBrowsingDataAll(&ClearBrowsingDataCompletedHandler::create(
+                                Box::new(move |result| {
+                                    if let Some(sender) = completion_sender.lock().unwrap().take() {
+                                        let _ = sender.send(
+                                            result
+                                                .map_err(|_| "清除平台登录资料失败。".to_string()),
+                                        );
+                                    }
+                                    Ok(())
+                                }),
+                            ))
+                    })();
+                    if result.is_err() {
+                        if let Some(sender) = callback_sender.lock().unwrap().take() {
+                            let _ = sender.send(Err("清除平台登录资料失败。".to_string()));
+                        }
+                    }
+                    Ok(())
+                }));
+                let mut event_token = 0;
+                core.add_NavigationCompleted(&callback, &mut event_token)?;
+                *token.lock().unwrap() = Some(event_token);
+                let blank = CoTaskMemPWSTR::from("about:blank");
+                core.Navigate(*blank.as_ref().as_pcwstr())
+            })();
+            if result.is_err() {
+                if let Some(sender) = sender.lock().unwrap().take() {
+                    let _ = sender.send(Err("清除平台登录资料失败。".to_string()));
+                }
+            }
+        })
+        .map_err(|_| "无法清除平台登录资料。")?;
+    tokio::time::timeout(std::time::Duration::from_secs(10), receiver)
+        .await
+        .map_err(|_| "清除平台登录资料超时，请重试。")?
+        .map_err(|_| "清除平台登录资料失败。")?
+}
+
+#[cfg(not(windows))]
+pub async fn clear_profile(window: &WebviewWindow) -> Result<(), String> {
+    window
+        .clear_all_browsing_data()
+        .map_err(|_| "清除平台登录资料失败。".into())
+}

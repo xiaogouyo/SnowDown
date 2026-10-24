@@ -5,6 +5,7 @@ mod clipboard;
 mod debug_probe;
 mod engine;
 mod model;
+mod qr_login;
 mod site_sessions;
 mod sites;
 mod storage;
@@ -31,6 +32,7 @@ pub struct AppState {
     settings: Mutex<Settings>,
     auth: auth::Auth,
     site_sessions: site_sessions::Sessions,
+    qr_login: qr_login::QrLogin,
     active: Mutex<HashMap<String, Arc<AtomicBool>>>,
     storage: Storage,
     ffmpeg: Option<PathBuf>,
@@ -99,34 +101,6 @@ fn read_clipboard_link(window: tauri::WebviewWindow) -> Result<Option<sites::Sou
         return Ok(None);
     }
     Ok(clipboard::read_text()?.and_then(|text| sites::recognize(&text).ok()))
-}
-
-#[tauri::command]
-async fn open_site_session(app: AppHandle, platform: Platform) -> Result<(), String> {
-    site_sessions::open_official(&app, platform)
-}
-
-#[tauri::command]
-async fn capture_site_session(
-    app: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    platform: Platform,
-) -> Result<(), String> {
-    let cookie = site_sessions::capture(&app, platform).await?;
-    state.site_sessions.save(platform, cookie)?;
-    state.emit(&app);
-    Ok(())
-}
-
-#[tauri::command]
-fn clear_site_session(
-    app: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    platform: Platform,
-) -> Result<(), String> {
-    state.site_sessions.clear(platform)?;
-    state.emit(&app);
-    Ok(())
 }
 
 #[tauri::command]
@@ -324,8 +298,19 @@ fn save_settings(
 }
 
 #[tauri::command]
-async fn begin_login(state: State<'_, Arc<AppState>>) -> Result<auth::LoginQr, String> {
-    state.auth.begin().await
+async fn begin_login(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    platform: Option<Platform>,
+) -> Result<qr_login::LoginQr, String> {
+    let platform = platform.unwrap_or_default();
+    let result = if platform == Platform::Bilibili {
+        state.auth.begin().await.map(Into::into)
+    } else {
+        state.qr_login.begin(&app, platform).await
+    };
+    state.emit(&app);
+    result
 }
 
 #[tauri::command]
@@ -333,8 +318,14 @@ async fn poll_login(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
     id: String,
-) -> Result<auth::LoginPoll, String> {
-    let result = state.auth.poll(&id).await?;
+    platform: Option<Platform>,
+) -> Result<qr_login::LoginPoll, String> {
+    let platform = platform.unwrap_or_default();
+    let result = if platform == Platform::Bilibili {
+        qr_login::LoginPoll::state(state.auth.poll(&id).await?.state)
+    } else {
+        state.qr_login.poll(&app, platform, &id).await?
+    };
     if result.state == "confirmed" {
         state.emit(&app);
     }
@@ -342,22 +333,47 @@ async fn poll_login(
 }
 
 #[tauri::command]
-fn cancel_login(state: State<'_, Arc<AppState>>) {
-    state.auth.cancel();
+fn cancel_login(app: AppHandle, state: State<'_, Arc<AppState>>, platform: Option<Platform>) {
+    let platform = platform.unwrap_or_default();
+    if platform == Platform::Bilibili {
+        state.auth.cancel();
+    } else {
+        state.qr_login.cancel(&app, platform);
+    }
 }
 
 #[tauri::command]
-fn logout(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    state.auth.logout()?;
+async fn logout(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    platform: Option<Platform>,
+) -> Result<(), String> {
+    let platform = platform.unwrap_or_default();
+    if platform == Platform::Bilibili {
+        state.auth.logout()?;
+    } else {
+        state.qr_login.cancel(&app, platform);
+        state.site_sessions.logout(&app, platform).await?;
+    }
     state.emit(&app);
     Ok(())
 }
 
 #[tauri::command]
-async fn check_login(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    state.auth.validate().await;
+async fn check_login(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    platform: Option<Platform>,
+) -> Result<(), String> {
+    let platform = platform.unwrap_or_default();
+    let result = if platform == Platform::Bilibili {
+        state.auth.validate().await;
+        Ok(())
+    } else {
+        state.qr_login.check(&app, platform).await.map(|_| ())
+    };
     state.emit(&app);
-    Ok(())
+    result
 }
 
 #[tauri::command]
@@ -406,6 +422,12 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let data_dir = handle.path().app_data_dir()?;
+            #[cfg(debug_assertions)]
+            let data_dir = if std::env::var_os("SNOWDOWN_QR_VERIFY").is_some() {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/qr-qa-app-data")
+            } else {
+                data_dir
+            };
             std::fs::create_dir_all(&data_dir)?;
             let storage =
                 Storage::open(&data_dir.join("snowdown.db")).map_err(std::io::Error::other)?;
@@ -432,6 +454,7 @@ pub fn run() {
                 settings: Mutex::new(settings),
                 auth: auth::Auth::open(data_dir.join("bilibili-session.dat")),
                 site_sessions: site_sessions::Sessions::open(data_dir.join("site-sessions")),
+                qr_login: qr_login::QrLogin::default(),
                 active: Mutex::new(HashMap::new()),
                 storage,
                 ffmpeg: find_ffmpeg(&handle),
@@ -484,27 +507,6 @@ pub fn run() {
                 if window.label() == "main" {
                     api.prevent_close();
                     let _ = window.hide();
-                } else if let Some(platform) = match window.label() {
-                    "official-douyin" => Some(Platform::Douyin),
-                    "official-xiaohongshu" => Some(Platform::Xiaohongshu),
-                    _ => None,
-                } {
-                    api.prevent_close();
-                    let handle = window.app_handle().clone();
-                    if let Some(page) = handle.get_webview_window(window.label()) {
-                        let _ = page.eval("document.querySelectorAll('video,audio').forEach(media => media.pause())");
-                    }
-                    let _ = window.hide();
-                    show_main(&handle);
-                    let state = handle.state::<Arc<AppState>>().inner().clone();
-                    tauri::async_runtime::spawn(async move {
-                        let saved = match site_sessions::capture(&handle, platform).await {
-                            Ok(cookie) => state.site_sessions.save(platform, cookie),
-                            Err(error) => Err(error),
-                        };
-                        state.emit(&handle);
-                        let _ = handle.emit_to("main", "snowdown://site-return", serde_json::json!({"platform":platform,"saved":saved.is_ok(),"error":saved.err()}));
-                    });
                 }
             }
         })
@@ -520,9 +522,6 @@ pub fn run() {
             logout,
             check_login,
             read_clipboard_link,
-            open_site_session,
-            capture_site_session,
-            clear_site_session,
             open_download_directory
         ])
         .run(tauri::generate_context!())

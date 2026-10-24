@@ -211,6 +211,24 @@ impl Sessions {
         Ok(())
     }
 
+    pub async fn logout(&self, app: &AppHandle, platform: Platform) -> Result<(), String> {
+        let index = match platform {
+            Platform::Douyin => 0,
+            Platform::Xiaohongshu => 1,
+            _ => return Err("B站使用专用登录模块。".into()),
+        };
+        let _guard = self.parsers[index].lock().await;
+        let window = login_window(app, platform)?;
+        window
+            .navigate("about:blank".parse().unwrap())
+            .map_err(|_| "无法停止平台登录页面。")?;
+        if let Some(parser) = app.get_webview_window(&format!("resolver-{}", platform.key())) {
+            let _ = parser.navigate("about:blank".parse().unwrap());
+        }
+        crate::web_capture::clear_profile(&window).await?;
+        self.clear(platform)
+    }
+
     pub async fn resolve(
         &self,
         app: &AppHandle,
@@ -284,16 +302,14 @@ impl Sessions {
     }
 }
 
-pub fn open_official(app: &AppHandle, platform: Platform) -> Result<(), String> {
+pub fn login_window(app: &AppHandle, platform: Platform) -> Result<tauri::WebviewWindow, String> {
     if platform == Platform::Bilibili {
         return Err("B站请使用官方二维码登录。".into());
     }
-    let url = platform.home().parse().unwrap();
     let label = format!("official-{}", platform.key());
     if let Some(window) = app.get_webview_window(&label) {
-        let _ = window.show();
-        let _ = window.set_focus();
-        return Ok(());
+        let _ = window.hide();
+        return Ok(window);
     }
     let directory = app
         .path()
@@ -301,18 +317,27 @@ pub fn open_official(app: &AppHandle, platform: Platform) -> Result<(), String> 
         .map_err(|_| "应用数据目录不可用。")?
         .join("official-profiles")
         .join(platform.key());
+    #[cfg(debug_assertions)]
+    let directory = if std::env::var_os("SNOWDOWN_QR_VERIFY").is_some() {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../.tools/qr-verify-profiles")
+            .join(platform.key())
+    } else {
+        directory
+    };
     std::fs::create_dir_all(&directory).map_err(|_| "官方网页会话目录不可用。")?;
-    WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
-        .title(format!(
-            "{}官方登录 · 登录后关闭窗口保存登录状态",
-            platform.label()
-        ))
+    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External("about:blank".parse().unwrap()))
+        .title(format!("SnowDown · {}后台扫码登录",platform.label()))
         .inner_size(1100.0, 780.0)
         .min_inner_size(800.0, 600.0)
+        .visible(false)
+        .focused(false)
+        .skip_taskbar(true)
+        .initialization_script("document.addEventListener('play', event => { if(event.target instanceof HTMLMediaElement) {event.target.muted=true;event.target.pause();}},true)")
         .data_directory(directory)
         .build()
         .map_err(|e| format!("无法打开官方登录：{e}"))?;
-    Ok(())
+    Ok(window)
 }
 
 fn open_parser(app: &AppHandle, source: &sites::Source) -> Result<tauri::WebviewWindow, String> {

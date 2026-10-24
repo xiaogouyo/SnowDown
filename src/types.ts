@@ -67,8 +67,8 @@ export interface AppSnapshot {
   version: string
 }
 
-export interface LoginQr { id: string; image: string; expiresAt: number }
-export interface LoginPoll { state: 'waiting' | 'scanned' | 'expired' | 'confirmed' }
+export interface LoginQr { id: string; image: string; expiresAt: number; state?: 'confirmed' }
+export interface LoginPoll { state: 'waiting' | 'scanned' | 'expired' | 'confirmed'; qr?: LoginQr }
 
 export interface CreateTaskRequest {
   video: VideoInfo

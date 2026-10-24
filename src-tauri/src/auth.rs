@@ -53,9 +53,9 @@ pub struct Auth {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginQr {
-    id: String,
-    image: String,
-    expires_at: u64,
+    pub id: String,
+    pub image: String,
+    pub expires_at: u64,
 }
 
 #[derive(Serialize)]

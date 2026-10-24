@@ -29,9 +29,7 @@ const accountPlatform = ref<Platform>('bilibili')
 const clipboardSuggestion = ref<SourceLink | null>(null)
 let lastClipboard = ''
 let unwatchFocus: (() => void) | undefined
-let unwatchSiteReturn: (() => void) | undefined
 let checkingClipboard = false
-let siteLoginActive = false
 const detectedSource = computed(() => identifySource(link.value))
 const platformList: Platform[] = ['bilibili', 'douyin', 'xiaohongshu']
 const filterOptions = [{ value: 'all', label: '全部状态' }, { value: 'downloading', label: '进行中' }, { value: 'paused', label: '已暂停' }, { value: 'failed', label: '失败' }]
@@ -43,6 +41,7 @@ const loginError = ref('')
 const maximized = ref(false)
 let loginTimer: ReturnType<typeof setTimeout> | undefined
 let loginGeneration = 0
+let loginPlatform: Platform = 'bilibili'
 let unwatchWindow: (() => void) | undefined
 const savingSettings = ref(false)
 const query = ref('')
@@ -109,7 +108,7 @@ function onPaste(event: ClipboardEvent) {
 }
 
 async function checkClipboard() {
-  if (checkingClipboard || siteLoginActive || !api.desktop || !snapshot.value?.settings.clipboardEnabled || analyzing.value || submitting.value || video.value || dialog.value) return
+  if (checkingClipboard || !api.desktop || !snapshot.value?.settings.clipboardEnabled || analyzing.value || submitting.value || video.value || dialog.value) return
   checkingClipboard = true
   try {
     const source = await api.readClipboardLink()
@@ -130,39 +129,12 @@ async function parseClipboardSuggestion() {
 
 function setFilter(value: string | number) { filter.value = String(value) as typeof filter.value }
 
-async function openSiteLogin() {
-  await openPlatformLogin(accountPlatform.value)
-}
-
 async function openSourceLogin() {
   const source = detectedSource.value
   if (!source || source.platform === 'bilibili') return
-  await openPlatformLogin(source.platform)
-}
-
-async function openPlatformLogin(platform: Platform) {
-  siteLoginActive = true
-  try {
-    await api.openSiteSession(platform)
-    notify('请在官方窗口完成登录或验证，关闭窗口后保存登录状态，再点击“解析视频”。')
-  } catch (error) { siteLoginActive = false; notify(errorMessage(error), 'error') }
-}
-
-async function onSiteReturn(platform: Platform, saved: boolean, error?: string) {
-  siteLoginActive = false
-  try { snapshot.value = await api.getSnapshot() } catch { /* State events also refresh session status. */ }
-  notify(saved ? `${platformLabels[platform]}登录状态已保存，请点击“解析视频”。` : error ?? '登录状态保存失败，请在平台账号中重试。', saved ? 'success' : 'error')
-}
-
-async function saveSiteSession(clear = false) {
-  savingSettings.value = true
-  try {
-    if (clear) await api.clearSiteSession(accountPlatform.value)
-    else await api.captureSiteSession(accountPlatform.value)
-    snapshot.value = await api.getSnapshot()
-    notify(clear ? '已清除软件保存的此平台会话。' : '官方网页会话已加密保存。', 'success')
-  } catch (error) { notify(errorMessage(error), 'error') }
-  finally { savingSettings.value = false }
+  openSettings('account')
+  accountPlatform.value = source.platform
+  await startLogin()
 }
 
 function togglePage(cid: number) {
@@ -219,33 +191,44 @@ function stopLogin() {
   loginGeneration++
   clearTimeout(loginTimer)
   loginQr.value = null; loginState.value = 'idle'
-  void api.cancelLogin().catch(() => {})
+  void api.cancelLogin(loginPlatform).catch(() => {})
 }
 
 async function startLogin() {
+  const platform = accountPlatform.value
   const generation = ++loginGeneration
+  const previousPlatform = loginPlatform
+  loginPlatform = platform
   clearTimeout(loginTimer)
   loginQr.value = null; loginError.value = ''; loginState.value = 'loading'
   try {
-    await api.cancelLogin()
+    await api.cancelLogin(previousPlatform)
     if (generation !== loginGeneration) return
-    const qr = await api.beginLogin()
+    const qr = await api.beginLogin(platform)
     if (generation !== loginGeneration) return
+    if (qr.state === 'confirmed') {
+      loginState.value = 'idle'
+      snapshot.value = await api.getSnapshot()
+      notify(`${platformLabels[platform]}登录成功，已加密保存。`, 'success')
+      return
+    }
     loginQr.value = qr; loginState.value = 'waiting'
     const poll = async () => {
       if (generation !== loginGeneration) return
-      if (Date.now() >= qr.expiresAt) { loginState.value = 'expired'; return }
+      if (Date.now() >= (loginQr.value?.expiresAt ?? qr.expiresAt)) { await startLogin(); return }
       try {
-        const result = await api.pollLogin(qr.id)
+        const result = await api.pollLogin(qr.id, platform)
         if (generation !== loginGeneration) return
         if (result.state === 'confirmed') {
           loginQr.value = null; loginState.value = 'idle'
           snapshot.value = await api.getSnapshot()
-          notify('B站登录成功，已安全保存。重启后将自动恢复。', 'success')
+          notify(`${platformLabels[platform]}登录成功，已安全保存。重启后将自动恢复。`, 'success')
           return
         }
+        if (result.state === 'expired') { await startLogin(); return }
+        if (result.qr) loginQr.value = result.qr
         loginState.value = result.state
-        if (result.state !== 'expired') loginTimer = setTimeout(poll, 2000)
+        loginTimer = setTimeout(poll, 2000)
       } catch (error) {
         if (generation !== loginGeneration) return
         loginState.value = 'error'; loginError.value = errorMessage(error)
@@ -261,14 +244,14 @@ async function startLogin() {
 async function logout() {
   savingSettings.value = true
   stopLogin()
-  try { await api.logout(); snapshot.value = await api.getSnapshot(); notify('已退出账号，并删除本机保存的登录状态。', 'success') }
+  try { await api.logout(accountPlatform.value); snapshot.value = await api.getSnapshot(); notify('已退出账号，并清除软件内此平台的登录状态。', 'success') }
   catch (error) { notify(errorMessage(error), 'error') }
   finally { savingSettings.value = false }
 }
 
 async function checkLogin() {
   savingSettings.value = true
-  try { await api.checkLogin(); snapshot.value = await api.getSnapshot() }
+  try { await api.checkLogin(accountPlatform.value); snapshot.value = await api.getSnapshot(); if (accountPlatform.value !== 'bilibili') notify(siteSessionSaved.value ? '登录状态有效。' : '登录已失效，请重新扫码。', siteSessionSaved.value ? 'success' : 'info') }
   catch (error) { notify(errorMessage(error), 'error') }
   finally { savingSettings.value = false }
 }
@@ -278,7 +261,7 @@ async function controlWindow(action: 'minimize' | 'maximize' | 'close') {
   catch (error) { notify(errorMessage(error), 'error') }
 }
 
-watch(() => dialog.value === 'settings' && settingsTab.value === 'account' && accountPlatform.value === 'bilibili', (visible) => { if (!visible) stopLogin() })
+watch(() => dialog.value === 'settings' && settingsTab.value === 'account' ? accountPlatform.value : null, () => { stopLogin() }, { flush: 'sync' })
 
 async function openFolder() {
   try { await api.openDirectory() } catch (error) { notify(errorMessage(error), 'error') }
@@ -297,12 +280,11 @@ onMounted(async () => {
     snapshot.value = await api.getSnapshot()
     unwatchWindow = await api.watchMaximized(value => { maximized.value = value })
     unwatchFocus = await api.watchFocus(() => { void checkClipboard() })
-    unwatchSiteReturn = await api.watchSiteReturn((platform, saved, error) => { void onSiteReturn(platform, saved, error) })
     await checkClipboard()
   } catch (error) { notify(`初始化失败：${errorMessage(error)}`, 'error') }
 })
 
-onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); unwatchSiteReturn?.(); stopLogin(); clearTimeout(toastTimer); document.removeEventListener('keydown', onKey) })
+onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); stopLogin(); clearTimeout(toastTimer); document.removeEventListener('keydown', onKey) })
 </script>
 
 <template>
@@ -421,7 +403,7 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); unwatc
         <div class="workspace-note"><span class="note-icon"><ShieldCheck :size="16" /></span><div><strong>安心收藏，文件始终在你手中</strong><p>视频直接保存到本地。关闭窗口后，SnowDown 会在系统托盘继续下载。</p></div><span class="note-decoration"><Snowflake :size="33" :stroke-width="1" /></span></div>
       </main>
 
-      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="dialog = 'about'">v{{ snapshot?.version ?? '0.1.3' }}</button></div></footer>
+      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="dialog = 'about'">v{{ snapshot?.version ?? '0.1.4' }}</button></div></footer>
     </div>
 
     <Transition name="toast"><div v-if="toast" :class="['toast-message', toast.type]" role="status"><CircleAlert v-if="toast.type === 'error'" :size="18" /><CircleCheck v-else-if="toast.type === 'success'" :size="18" /><Info v-else :size="18" /><span>{{ toast.text }}</span><button aria-label="关闭提示" @click="toast = null"><X :size="15" /></button></div></Transition>
@@ -457,8 +439,7 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); unwatc
         </div>
         <div v-else class="settings-content account-content">
           <div class="account-platform-tabs"><button v-for="platform in platformList" :key="platform" :class="{ active: accountPlatform === platform }" @click="accountPlatform = platform">{{ platformLabels[platform] }}</button></div>
-          <template v-if="accountPlatform === 'bilibili'">
-          <template v-if="snapshot?.authenticated && !loginQr && loginState === 'idle'">
+          <template v-if="accountPlatform === 'bilibili' && snapshot?.authenticated && !loginQr && loginState === 'idle'">
             <div class="account-illustration account-avatar"><img v-if="snapshot.auth.account?.avatar" :src="snapshot.auth.account.avatar" alt="B站头像" referrerpolicy="no-referrer" /><UserRound v-else :size="25" /></div>
             <h3>{{ snapshot.auth.account?.name || 'B站账号' }}</h3>
             <span class="login-saved"><ShieldCheck :size="14" />登录状态已加密保存</span>
@@ -467,36 +448,32 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); unwatc
             <p v-if="snapshot.auth.message" class="account-tip">{{ snapshot.auth.message }}</p>
             <div class="account-buttons"><button class="button secondary" :disabled="savingSettings" @click="logout">退出账号</button><button class="button secondary" :disabled="savingSettings" @click="checkLogin">检查登录</button></div>
           </template>
+          <template v-else-if="accountPlatform !== 'bilibili' && siteSessionSaved && !loginQr && loginState === 'idle'">
+            <div class="account-illustration"><ShieldCheck :size="25" /></div>
+            <h3>{{ platformLabels[accountPlatform] }}账号</h3>
+            <span class="login-saved"><ShieldCheck :size="14" />登录状态已加密保存</span>
+            <p>已保存此平台登录状态。输入视频链接并点击“解析视频”即可选择下载。</p>
+            <div class="account-buttons"><button class="button secondary" :disabled="savingSettings" @click="logout">退出账号</button><button class="button secondary" :disabled="savingSettings" @click="checkLogin">检查登录</button></div>
+          </template>
           <template v-else>
             <div class="account-illustration"><QrCode :size="25" /></div>
-            <h3>B站官方扫码登录</h3>
-            <p>使用手机 B站扫描二维码，在 B站内确认登录。无需填写密码或复制 Cookie。</p>
+            <h3>{{ platformLabels[accountPlatform] }}官方扫码登录</h3>
+            <p>使用手机{{ platformLabels[accountPlatform] }}扫描二维码，在手机上确认登录。二维码过期后会自动更新。</p>
             <div class="login-qr" :aria-busy="loginState === 'loading'">
-              <img v-if="loginQr" :src="loginQr.image" alt="B站官方登录二维码" :class="{ faded: ['expired', 'error'].includes(loginState) }" />
+              <img v-if="loginQr" :src="loginQr.image" :alt="platformLabels[accountPlatform] + '官方登录二维码'" :class="{ faded: loginState === 'error' }" />
               <LoaderCircle v-else-if="loginState === 'loading'" class="spin" :size="30" />
               <QrCode v-else :size="82" :stroke-width="1" />
-              <div v-if="['expired', 'error'].includes(loginState)" class="qr-expired"><button class="button primary" @click="startLogin"><RotateCcw :size="15" />刷新二维码</button></div>
+              <div v-if="loginState === 'error'" class="qr-expired"><button class="button primary" @click="startLogin"><RotateCcw :size="15" />重新获取</button></div>
             </div>
-            <p class="qr-status" role="status">{{ loginState === 'loading' ? '正在获取官方二维码…' : loginState === 'waiting' ? '请用手机 B站扫码' : loginState === 'scanned' ? '已扫码，请在手机 B站确认登录' : loginState === 'expired' ? '二维码已过期，请刷新后重试' : loginState === 'error' ? loginError : snapshot?.auth.message || '确认登录后，将自动记住此账号' }}</p>
+            <p class="qr-status" role="status">{{ loginState === 'loading' ? '正在获取官方二维码…' : loginState === 'waiting' ? '请用手机' + platformLabels[accountPlatform] + '扫码 · 过期自动更新' : loginState === 'scanned' ? '已扫码，请在手机' + platformLabels[accountPlatform] + '确认登录' : loginState === 'error' ? loginError : '确认登录后，将自动保存登录状态' }}</p>
             <button v-if="loginState === 'idle'" class="button primary login-start" @click="startLogin"><QrCode :size="16" />获取登录二维码</button>
-            <button v-if="snapshot?.authenticated" class="text-button login-back" @click="stopLogin">返回当前账号</button>
           </template>
-          <div class="login-privacy"><ShieldCheck :size="16" /><span>登录状态由 Windows 加密，仅供当前系统用户使用。B站会话失效后需重新扫码。</span></div>
-          </template>
-          <template v-else>
-            <div class="account-illustration"><UserRound :size="25" /></div>
-            <h3>{{ platformLabels[accountPlatform] }}官方网页会话</h3>
-            <span v-if="siteSessionSaved" class="login-saved"><ShieldCheck :size="14" />已加密保存网页会话</span>
-            <p>在官方窗口完成登录或验证，关闭窗口后保存登录状态。下载时粘贴链接并点击“解析视频”，结果会显示在软件内。各平台账号分别保存。</p>
-            <div class="site-login-actions"><button class="button secondary" @click="openSiteLogin"><ExternalLink :size="15" />打开官方登录</button><button class="button primary" :disabled="savingSettings" @click="saveSiteSession()"><ShieldCheck :size="15" />保存登录状态</button></div>
-            <button v-if="siteSessionSaved" class="text-button clear-site-session" :disabled="savingSettings" @click="saveSiteSession(true)">清除软件保存的此平台会话</button>
-            <div class="login-privacy"><ShieldCheck :size="16" /><span>各平台会话分别加密保存，失效后可更新。官方网页中的账号可在该页面退出；清除软件会话不会替你操作官方账号。</span></div>
-          </template>
+          <div class="login-privacy"><ShieldCheck :size="16" /><span>二维码来自平台官方登录流程，过期后自动更新。登录状态由 Windows 加密保存，仅供当前系统用户使用。登录与视频解析相互独立。</span></div>
         </div>
         <div v-if="settingsTab === 'download'" class="modal-footer"><span>设置适用于之后创建的新任务</span><button class="button primary" :disabled="savingSettings" @click="saveSettings"><Check :size="16" />保存设置</button></div>
       </section>
     </div>
 
-    <div v-if="dialog === 'about'" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.3' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="dialog = null">开始收藏<ExternalLink :size="14" /></button></section></div>
+    <div v-if="dialog === 'about'" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.4' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="dialog = null">开始收藏<ExternalLink :size="14" /></button></section></div>
   </div>
 </template>
