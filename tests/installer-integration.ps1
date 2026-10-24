@@ -1,5 +1,6 @@
 ﻿$ErrorActionPreference = 'Stop'
 $taskRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$taskVersion = (Get-Content -LiteralPath (Join-Path $taskRoot 'package.json') -Raw | ConvertFrom-Json).version
 $taskId = [Guid]::NewGuid().ToString('N')
 $taskQaRoot = [IO.Path]::GetFullPath((Join-Path $taskRoot ".tools\installer-qa-$taskId"))
 if (-not $taskQaRoot.StartsWith($taskRoot + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) { throw 'QA path escaped workspace.' }
@@ -33,7 +34,7 @@ try {
         if ($taskSourceHash -ne $taskTargetHash) { throw 'Installed file integrity failed.' }
     }
     $taskKey = $taskUserRegistry.OpenSubKey($taskRegistry)
-    if (-not $taskKey -or $taskKey.GetValue('DisplayVersion') -ne '0.1.1') { throw 'QA add/remove programs entry missing.' }
+    if (-not $taskKey -or $taskKey.GetValue('DisplayVersion') -ne $taskVersion) { throw 'QA add/remove programs entry missing.' }
     $taskKey.Dispose()
     # A harmless console fixture holds the target executable. Neither frontend nor
     # NSIS backend may terminate it to complete an installation.

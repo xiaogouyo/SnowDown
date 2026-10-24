@@ -7,8 +7,10 @@ import {
   Search, Settings2, ShieldCheck, SlidersHorizontal, Snowflake, Trash2, UserRound, X, Minus, Square, Copy, QrCode,
 } from '@lucide/vue'
 import * as api from './api'
+import UiSelect from './components/UiSelect.vue'
+import { identifySource, platformLabels, sourceSummary } from './sources'
 import { bytes, duration, errorMessage, statusLabels } from './format'
-import type { AppSnapshot, DownloadTask, OutputFormat, Settings, VideoInfo, LoginQr } from './types'
+import type { AppSnapshot, DownloadTask, OutputFormat, Settings, VideoInfo, LoginQr, Platform, SourceLink } from './types'
 
 const snapshot = ref<AppSnapshot | null>(null)
 const view = ref<'active' | 'completed' | 'history'>('active')
@@ -22,7 +24,19 @@ const quality = ref(32)
 const format = ref<OutputFormat>('video')
 const dialog = ref<'settings' | 'about' | null>(null)
 const settingsTab = ref<'download' | 'account'>('download')
-const settingsDraft = reactive<Settings>({ downloadDir: '', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false })
+const settingsDraft = reactive<Settings>({ downloadDir: '', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false })
+const accountPlatform = ref<Platform>('bilibili')
+const clipboardSuggestion = ref<SourceLink | null>(null)
+let lastClipboard = ''
+let unwatchFocus: (() => void) | undefined
+let unwatchSiteReturn: (() => void) | undefined
+let checkingClipboard = false
+let openedOfficialSource: SourceLink | null = null
+const detectedSource = computed(() => identifySource(link.value))
+const platformList: Platform[] = ['bilibili', 'douyin', 'xiaohongshu']
+const filterOptions = [{ value: 'all', label: '全部状态' }, { value: 'downloading', label: '进行中' }, { value: 'paused', label: '已暂停' }, { value: 'failed', label: '失败' }]
+const concurrencyOptions = [1, 2, 3, 4].map(value => ({ value, label: `${value} 个任务` }))
+const siteSessionSaved = computed(() => snapshot.value?.siteSessions.some(site => site.platform === accountPlatform.value && site.saved))
 const loginQr = ref<LoginQr | null>(null)
 const loginState = ref<'idle' | 'loading' | 'waiting' | 'scanned' | 'expired' | 'error'>('idle')
 const loginError = ref('')
@@ -64,7 +78,11 @@ function focusLink() { setView('active'); linkInput.value?.focus() }
 
 async function analyze() {
   if (analyzing.value) return
-  if (!link.value.trim()) { focusLink(); notify('先粘贴一个B站视频链接或BV号。'); return }
+  if (!link.value.trim()) { focusLink(); notify('先粘贴一个B站、抖音或小红书视频链接。'); return }
+  const source = identifySource(link.value)
+  if (!source) { notify('没有识别到支持的视频链接，可粘贴平台的完整分享内容。', 'error'); return }
+  link.value = source.url
+  clipboardSuggestion.value = null
   analyzing.value = true
   try {
     const result = await api.inspectVideo(link.value)
@@ -77,8 +95,86 @@ async function analyze() {
 }
 
 async function paste() {
-  try { link.value = await navigator.clipboard.readText(); linkInput.value?.focus() }
-  catch { focusLink(); notify('请在输入框中按 Ctrl+V 粘贴链接。') }
+  try {
+    const source = await api.readClipboardLink()
+    if (!source) { notify('剪贴板中没有B站、抖音或小红书视频链接。'); return }
+    link.value = source.url; lastClipboard = source.url; linkInput.value?.focus()
+    await analyze()
+  } catch { focusLink(); notify('无法读取剪贴板，请按 Ctrl+V 粘贴链接，再按 Enter 解析。') }
+}
+
+function onPaste(event: ClipboardEvent) {
+  const source = identifySource(event.clipboardData?.getData('text/plain') ?? '')
+  if (source) { event.preventDefault(); link.value = source.url; clipboardSuggestion.value = null }
+}
+
+async function checkClipboard() {
+  if (checkingClipboard || !api.desktop || !snapshot.value?.settings.clipboardEnabled || analyzing.value || submitting.value || video.value || dialog.value) return
+  checkingClipboard = true
+  try {
+    const source = await api.readClipboardLink()
+    if (!source || source.url === lastClipboard) return
+    lastClipboard = source.url
+    if (link.value.trim() && detectedSource.value?.url !== source.url) { clipboardSuggestion.value = source; return }
+    link.value = source.url; clipboardSuggestion.value = source
+    if (snapshot.value?.settings.clipboardAutoParse) await analyze()
+  } catch { /* Automatic detection is quiet; explicit paste reports errors. */ }
+  finally { checkingClipboard = false }
+}
+
+async function parseClipboardSuggestion() {
+  if (!clipboardSuggestion.value) return
+  link.value = clipboardSuggestion.value.url
+  await analyze()
+}
+
+function setFilter(value: string | number) { filter.value = String(value) as typeof filter.value }
+
+async function openSiteLogin() {
+  const source = detectedSource.value?.platform === accountPlatform.value ? detectedSource.value : null
+  openedOfficialSource = source
+  try { await api.openSiteSession(accountPlatform.value, source?.url); notify('在官方页面完成登录或验证并播放视频，关闭该窗口后会返回软件自动解析。') }
+  catch (error) { openedOfficialSource = null; notify(errorMessage(error), 'error') }
+}
+
+async function parseOfficialPage() {
+  const source = detectedSource.value
+  if (!source || source.platform === 'bilibili') return
+  openedOfficialSource = source
+  try {
+    await api.openSiteSession(source.platform, source.url)
+    notify('在官方页面完成登录或验证并播放视频，关闭该窗口后会返回软件自动解析。')
+  } catch (error) { openedOfficialSource = null; notify(errorMessage(error), 'error') }
+}
+
+async function onSiteReturn(platform: Platform, input?: string) {
+  const opened = openedOfficialSource
+  openedOfficialSource = null
+  const returned = input ? identifySource(input) : null
+  if (submitting.value || video.value) return
+  if (returned?.platform === platform) {
+    if (opened && link.value.trim() && detectedSource.value?.url !== opened.url) {
+      clipboardSuggestion.value = returned
+      notify('官方页面的视频已就绪，点击链接提示即可解析。')
+      return
+    }
+    link.value = returned.url
+  }
+  if (detectedSource.value?.platform !== platform || analyzing.value) return
+  dialog.value = null
+  await analyze()
+}
+
+async function saveSiteSession(clear = false) {
+  savingSettings.value = true
+  try {
+    if (clear) await api.clearSiteSession(accountPlatform.value)
+    else await api.captureSiteSession(accountPlatform.value)
+    snapshot.value = await api.getSnapshot()
+    notify(clear ? '已清除软件保存的此平台会话。' : '官方网页会话已加密保存。', 'success')
+    if (!clear && detectedSource.value?.platform === accountPlatform.value) { dialog.value = null; await analyze() }
+  } catch (error) { notify(errorMessage(error), 'error') }
+  finally { savingSettings.value = false }
 }
 
 function togglePage(cid: number) {
@@ -90,7 +186,7 @@ async function submit() {
   submitting.value = true
   try {
     await api.createTasks({ video: video.value, pageCids: selectedPages.value, quality: quality.value, format: format.value })
-    notify(`已将 ${selectedPages.value.length} 个分P加入下载队列。`, 'success')
+    notify(`已将 ${selectedPages.value.length} 个${video.value.platform === 'bilibili' ? '分P' : '视频'}加入下载队列。`, 'success')
     video.value = null; link.value = ''; setView('active')
   } catch (error) { notify(errorMessage(error), 'error') }
   finally { submitting.value = false }
@@ -116,6 +212,7 @@ async function bulk(name: 'pause' | 'resume') {
 function openSettings(tab: 'download' | 'account' = 'download') {
   if (snapshot.value) Object.assign(settingsDraft, snapshot.value.settings)
   settingsTab.value = tab; dialog.value = 'settings'
+  if (tab === 'account') accountPlatform.value = detectedSource.value?.platform ?? 'bilibili'
 }
 
 async function chooseFolder() {
@@ -193,7 +290,7 @@ async function controlWindow(action: 'minimize' | 'maximize' | 'close') {
   catch (error) { notify(errorMessage(error), 'error') }
 }
 
-watch(() => dialog.value === 'settings' && settingsTab.value === 'account', (visible) => { if (!visible) stopLogin() })
+watch(() => dialog.value === 'settings' && settingsTab.value === 'account' && accountPlatform.value === 'bilibili', (visible) => { if (!visible) stopLogin() })
 
 async function openFolder() {
   try { await api.openDirectory() } catch (error) { notify(errorMessage(error), 'error') }
@@ -201,6 +298,7 @@ async function openFolder() {
 
 function onKey(event: KeyboardEvent) {
   if (event.ctrlKey && event.key.toLowerCase() === 'n') { event.preventDefault(); focusLink() }
+  if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'v') { event.preventDefault(); void paste() }
   if (event.key === 'Escape' && !submitting.value) { video.value = null; dialog.value = null }
 }
 
@@ -210,10 +308,13 @@ onMounted(async () => {
     unsubscribe = await api.subscribe((state) => { snapshot.value = state })
     snapshot.value = await api.getSnapshot()
     unwatchWindow = await api.watchMaximized(value => { maximized.value = value })
+    unwatchFocus = await api.watchFocus(() => { void checkClipboard() })
+    unwatchSiteReturn = await api.watchSiteReturn((platform, input) => { void onSiteReturn(platform, input) })
+    await checkClipboard()
   } catch (error) { notify(`初始化失败：${errorMessage(error)}`, 'error') }
 })
 
-onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); stopLogin(); clearTimeout(toastTimer); document.removeEventListener('keydown', onKey) })
+onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); unwatchSiteReturn?.(); stopLogin(); clearTimeout(toastTimer); document.removeEventListener('keydown', onKey) })
 </script>
 
 <template>
@@ -249,7 +350,7 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); stopLogin(); clearTimeou
         <div class="sidebar-divider"></div>
         <button class="profile" @click="openSettings('account')">
           <span class="avatar"><img v-if="snapshot?.auth.account?.avatar" :src="snapshot.auth.account.avatar" alt="" referrerpolicy="no-referrer" /><UserRound v-else :size="17" /></span>
-          <span class="profile-text"><strong>{{ snapshot?.auth.account?.name || '本地收藏家' }}</strong><small>{{ snapshot?.authenticated ? 'B站账号 · 登录已保存' : '连接B站账号 · 解锁可用画质' }}</small></span>
+          <span class="profile-text"><strong>{{ snapshot?.auth.account?.name || '本地收藏家' }}</strong><small>{{ snapshot?.authenticated ? 'B站账号 · 登录已保存' : '连接平台账号 · 使用官方会话' }}</small></span>
           <ChevronDown :size="13" />
         </button>
       </div>
@@ -268,14 +369,15 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); stopLogin(); clearTimeou
         </section>
 
         <section class="link-card" aria-label="添加下载">
-          <div class="link-card-label"><span class="bilibili-mark">bilibili</span><span>从一个链接开始收藏</span><span class="local-badge"><ShieldCheck :size="12" />本地下载</span></div>
+          <div class="link-card-label"><div class="platform-list"><span v-for="platform in platformList" :key="platform" :class="['platform-chip', platform, { detected: detectedSource?.platform === platform }]">{{ platformLabels[platform] }}</span></div><span>从一个链接开始收藏</span><span class="local-badge"><ShieldCheck :size="12" />本地下载</span></div>
           <form class="link-form" @submit.prevent="analyze">
             <Link2 :size="19" class="link-icon" />
-            <input ref="linkInput" v-model="link" aria-label="B站视频链接" placeholder="粘贴 B站视频链接、BV号，或 b23.tv 分享链接…" :disabled="analyzing" spellcheck="false" />
-            <button class="paste-button" type="button" title="粘贴剪贴板链接" @click="paste"><ClipboardPaste :size="15" /><span>粘贴</span></button>
+            <input ref="linkInput" v-model="link" aria-label="视频链接" placeholder="粘贴B站、抖音、小红书链接，或完整分享内容…" :disabled="analyzing" spellcheck="false" @paste="onPaste" />
+            <button class="paste-button" type="button" title="读取剪贴板并解析 · Ctrl+Shift+V" :disabled="analyzing" @click="paste"><ClipboardPaste :size="15" /><span>粘贴并解析</span></button>
             <button class="button primary analyze-button" type="submit" :disabled="analyzing"><LoaderCircle v-if="analyzing" :size="16" class="spin" /><Download v-else :size="16" />{{ analyzing ? '正在解析' : '解析视频' }}</button>
           </form>
-          <div class="link-card-footer"><span><Check :size="13" />单视频 / 多P批量</span><span><Check :size="13" />视频 / 音频 / 字幕 / 弹幕</span><span class="shortcut-tip">粘贴链接后按 <kbd>Enter</kbd> 解析</span></div>
+          <div class="link-card-footer"><span v-if="detectedSource" class="recognized-source"><CircleCheck :size="13" />已识别{{ platformLabels[detectedSource.platform] }}<small>{{ sourceSummary(detectedSource) }}</small></span><span v-else><Check :size="13" />自动识别平台 · 支持分享短链接</span><button v-if="detectedSource && detectedSource.platform !== 'bilibili'" class="text-button" @click="parseOfficialPage">官方页面解析</button><span class="shortcut-tip"><kbd>Ctrl Shift V</kbd> 粘贴并解析 · <kbd>Enter</kbd> 解析</span></div>
+          <div v-if="clipboardSuggestion" class="clipboard-suggestion"><ClipboardPaste :size="15" /><span>剪贴板识别到{{ platformLabels[clipboardSuggestion.platform] }}链接</span><button class="text-button" @click="parseClipboardSuggestion">立即解析<ArrowUpRight :size="13" /></button><button class="icon-button" aria-label="忽略剪贴板链接" @click="clipboardSuggestion = null"><X :size="14" /></button></div>
         </section>
 
         <section class="task-section">
@@ -283,7 +385,7 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); stopLogin(); clearTimeou
             <div class="section-title"><h2>{{ view === 'active' ? '下载列表' : viewTitle }}</h2><span class="count-pill">{{ currentTasks.length }}</span></div>
             <div class="list-tools">
               <label v-if="tasks.length" class="search-box"><Search :size="14" /><input v-model="query" aria-label="搜索任务" placeholder="搜索任务" /></label>
-              <label v-if="view === 'active'" class="filter-select"><SlidersHorizontal :size="14" /><select v-model="filter" aria-label="筛选下载状态"><option value="all">全部状态</option><option value="downloading">进行中</option><option value="paused">已暂停</option><option value="failed">失败</option></select><ChevronDown :size="12" /></label>
+              <div v-if="view === 'active'" class="filter-select"><SlidersHorizontal :size="14" /><UiSelect :model-value="filter" :options="filterOptions" label="筛选下载状态" compact @update:model-value="setFilter" /></div>
               <button class="text-button" @click="openFolder"><FolderOpen :size="15" />打开文件夹</button>
             </div>
           </div>
@@ -301,17 +403,17 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); stopLogin(); clearTimeou
                 <svg viewBox="0 0 180 140"><defs><linearGradient id="empty-bg" x2="0" y2="1"><stop stop-color="#edf6ff"/><stop offset="1" stop-color="#f8fbff"/></linearGradient></defs><ellipse cx="90" cy="121" rx="57" ry="8" fill="#eaf0f7"/><rect x="44" y="22" width="80" height="90" rx="10" fill="#e4effb" transform="rotate(-10 84 67)"/><rect x="55" y="17" width="80" height="94" rx="10" fill="url(#empty-bg)" stroke="#c2d8f1" stroke-width="1.5"/><path d="m65 85 18-24 17 19 10-12 15 17" fill="#d9e9fa"/><circle cx="110" cy="43" r="8" fill="#d5e7fb"/><path d="M35 92h36l8 10h23l8-10h35v25a7 7 0 0 1-7 7H42a7 7 0 0 1-7-7z" fill="#fff" stroke="#b9d0eb" stroke-width="1.5"/><path d="M89 44v31m-9-9 9 10 9-10" stroke="#5b94da" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </div>
               <h3>{{ query || filter !== 'all' ? '没有找到匹配的任务' : view === 'completed' ? '收藏正在路上' : view === 'history' ? '你的收藏故事，从这里开始' : '还没有下载任务' }}</h3>
-              <p>{{ query || filter !== 'all' ? '试试其他关键词，或调整筛选条件。' : view === 'completed' ? '视频下载完成后，会自动出现在这里。' : '粘贴一个B站链接，把喜欢的内容留在本地。' }}</p>
+              <p>{{ query || filter !== 'all' ? '试试其他关键词，或调整筛选条件。' : view === 'completed' ? '视频下载完成后，会自动出现在这里。' : '粘贴视频链接，把喜欢的内容留在本地。' }}</p>
               <button v-if="!query && filter === 'all'" class="button empty-button" @click="focusLink"><Plus :size="15" />添加第一个下载</button>
             </div>
 
             <div v-else class="task-list">
               <article v-for="task in currentTasks" :key="task.id" class="task-row">
                 <input type="checkbox" :aria-label="`选择 ${task.title}`" :checked="selectedTasks.includes(task.id)" @change="toggleTask(task.id)" />
-                <div class="task-cover"><img v-if="task.cover" :src="task.cover" alt="" loading="lazy" referrerpolicy="no-referrer" /><Film v-else :size="24" /><span>{{ task.format === 'audio' ? '音频' : `P${task.page}` }}</span></div>
+                <div class="task-cover"><img v-if="task.cover" :src="task.cover" alt="" loading="lazy" referrerpolicy="no-referrer" /><Film v-else :size="24" /><span>{{ task.format === 'audio' ? '音频' : task.platform === 'bilibili' ? `P${task.page}` : '视频' }}</span></div>
                 <div class="task-info">
                   <div class="task-title-line"><h3 :title="task.title">{{ task.title }}</h3><span :class="['status-tag', task.status]">{{ statusLabels[task.status] }}</span></div>
-                  <div class="task-meta"><span v-if="task.format === 'audio'"><Music2 :size="11" />M4A</span><span v-else>MP4 · {{ task.qualityLabel }}</span><i></i><span class="page-title" :title="task.pageTitle">P{{ task.page }} · {{ task.pageTitle }}</span></div>
+                  <div class="task-meta"><span :class="['task-platform', task.platform]">{{ platformLabels[task.platform ?? 'bilibili'] }}</span><i></i><span v-if="task.format === 'audio'"><Music2 :size="11" />M4A</span><span v-else>MP4 · {{ task.qualityLabel }}</span><i></i><span class="page-title" :title="task.pageTitle">{{ task.platform === 'bilibili' || !task.platform ? `P${task.page} · ` : '' }}{{ task.pageTitle }}</span></div>
                   <div v-if="['downloading', 'merging', 'paused', 'queued'].includes(task.status)" class="progress-track"><div :class="{ paused: task.status === 'paused' }" :style="{ width: `${Math.min(task.progress, 100)}%` }"></div></div>
                   <div class="task-detail"><span v-if="task.error" class="task-error" :title="task.error">{{ task.error }}</span><span v-else-if="task.warning" class="task-warning" :title="task.warning">{{ task.warning }}</span><span v-else-if="task.status === 'completed'">{{ bytes(task.totalBytes) }}<span class="detail-separator">·</span>已保存到下载目录</span><span v-else>{{ bytes(task.downloadedBytes) }}<template v-if="task.totalBytes"> / {{ bytes(task.totalBytes) }}</template></span><span v-if="task.status === 'downloading'" class="task-speed">{{ bytes(task.speed) }}/s<span class="detail-separator">·</span>{{ task.progress.toFixed(1) }}%</span><span v-else-if="task.status === 'merging'">正在生成完整文件…</span></div>
                 </div>
@@ -331,7 +433,7 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); stopLogin(); clearTimeou
         <div class="workspace-note"><span class="note-icon"><ShieldCheck :size="16" /></span><div><strong>安心收藏，文件始终在你手中</strong><p>视频直接保存到本地。关闭窗口后，SnowDown 会在系统托盘继续下载。</p></div><span class="note-decoration"><Snowflake :size="33" :stroke-width="1" /></span></div>
       </main>
 
-      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="dialog = 'about'">v{{ snapshot?.version ?? '0.1.1' }}</button></div></footer>
+      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="dialog = 'about'">v{{ snapshot?.version ?? '0.1.2' }}</button></div></footer>
     </div>
 
     <Transition name="toast"><div v-if="toast" :class="['toast-message', toast.type]" role="status"><CircleAlert v-if="toast.type === 'error'" :size="18" /><CircleCheck v-else-if="toast.type === 'success'" :size="18" /><Info v-else :size="18" /><span>{{ toast.text }}</span><button aria-label="关闭提示" @click="toast = null"><X :size="15" /></button></div></Transition>
@@ -339,12 +441,12 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); stopLogin(); clearTimeou
     <div v-if="video" class="modal-overlay" @mousedown.self="!submitting && (video = null)">
       <section class="modal video-modal" role="dialog" aria-modal="true" aria-labelledby="video-dialog-title">
         <div class="modal-header"><div><span class="eyebrow">NEW COLLECTION</span><h2 id="video-dialog-title">准备好收藏了吗？</h2></div><button class="icon-button" aria-label="关闭视频选择" :disabled="submitting" @click="video = null"><X :size="20" /></button></div>
-        <div class="video-summary"><img :src="video.cover" alt="视频封面" referrerpolicy="no-referrer" /><div><h3>{{ video.title }}</h3><p>{{ video.author }}<span>·</span>{{ duration(video.duration) }}<span>·</span>{{ video.pages.length }} 个分P</p><small>{{ video.bvid }}</small></div></div>
-        <div class="format-grid"><label :class="['format-option', { chosen: format === 'video' }]"><input v-model="format" type="radio" value="video" /><Film :size="21" /><span><strong>视频</strong><small>MP4 · 自动合并音视频</small></span><CircleCheck v-if="format === 'video'" :size="17" /></label><label :class="['format-option', { chosen: format === 'audio' }]"><input v-model="format" type="radio" value="audio" /><Music2 :size="21" /><span><strong>仅音频</strong><small>M4A · 保留原始音质</small></span><CircleCheck v-if="format === 'audio'" :size="17" /></label></div>
-        <label v-if="format === 'video'" class="field-row"><span>视频画质</span><select v-model="quality"><option v-for="item in video.qualities" :key="item.id" :value="item.id">{{ item.label }}{{ item.width ? ` · ${item.width} × ${item.height}` : '' }}</option></select></label>
-        <p class="quality-hint"><Info :size="13" />仅展示当前可用画质。可在设置中扫码登录B站后重新解析。</p>
-        <div class="pages-heading"><strong>选择分P <span>{{ selectedPages.length }} / {{ video.pages.length }}</span></strong><button class="text-button" @click="selectedPages = allPagesSelected ? [] : video.pages.map(p => p.cid)"><CheckCheck :size="14" />{{ allPagesSelected ? '取消全选' : '全选分P' }}</button></div>
-        <div class="pages-list"><label v-for="page in video.pages" :key="page.cid" :class="['page-option', { checked: selectedPages.includes(page.cid) }]"><input type="checkbox" :checked="selectedPages.includes(page.cid)" @change="togglePage(page.cid)" /><span class="page-number">P{{ page.page }}</span><span class="part-title">{{ page.part }}</span><small>{{ duration(page.duration) }}</small></label></div>
+        <div class="video-summary"><img :src="video.cover" alt="视频封面" referrerpolicy="no-referrer" /><div><h3>{{ video.title }}</h3><p>{{ video.author }}<span>·</span>{{ duration(video.duration) }}<span>·</span>{{ video.pages.length }} {{ video.platform === 'bilibili' ? '个分P' : '个视频' }}</p><small>{{ platformLabels[video.platform] }} · {{ video.bvid }}</small></div></div>
+        <div class="format-grid"><label :class="['format-option', { chosen: format === 'video' }]"><input v-model="format" type="radio" value="video" /><Film :size="21" /><span><strong>视频</strong><small>MP4 · 自动合并音视频</small></span><CircleCheck v-if="format === 'video'" :size="17" /></label><label :class="['format-option', { chosen: format === 'audio' }]"><input v-model="format" type="radio" value="audio" /><Music2 :size="21" /><span><strong>仅音频</strong><small>{{ video.platform === 'bilibili' ? 'M4A · 保留原始音质' : 'M4A · 提取音轨' }}</small></span><CircleCheck v-if="format === 'audio'" :size="17" /></label></div>
+        <div v-if="format === 'video'" class="field-row"><span>视频画质</span><UiSelect :model-value="quality" :options="video.qualities.map(item => ({ value: item.id, label: item.label + (item.width ? ` · ${item.width} × ${item.height}` : '') }))" label="视频画质" @update:model-value="value => quality = Number(value)" /></div>
+        <p class="quality-hint"><Info :size="13" />{{ platformLabels[video.platform] }} · {{ video.platform === 'bilibili' ? '仅展示当前可用画质。扫码登录后重新解析可刷新画质。' : '仅展示平台实际返回的视频流，访问限制可在平台账号中处理。' }}</p>
+        <div class="pages-heading"><strong>{{ video.platform === 'bilibili' ? '选择分P' : '选择视频' }} <span>{{ selectedPages.length }} / {{ video.pages.length }}</span></strong><button v-if="video.pages.length > 1" class="text-button" @click="selectedPages = allPagesSelected ? [] : video.pages.map(p => p.cid)"><CheckCheck :size="14" />{{ allPagesSelected ? '取消全选' : '全选分P' }}</button></div>
+        <div class="pages-list"><label v-for="page in video.pages" :key="page.cid" :class="['page-option', { checked: selectedPages.includes(page.cid) }]"><input type="checkbox" :checked="selectedPages.includes(page.cid)" @change="togglePage(page.cid)" /><span class="page-number">{{ video.platform === 'bilibili' ? `P${page.page}` : page.page }}</span><span class="part-title">{{ page.part }}</span><small>{{ duration(page.duration) }}</small></label></div>
         <div class="modal-footer"><span><FolderOpen :size="14" />保存到本地下载目录</span><button class="button primary" :disabled="!selectedPages.length || submitting" @click="submit"><LoaderCircle v-if="submitting" :size="16" class="spin" /><Download v-else :size="16" />下载 {{ selectedPages.length }} 项</button></div>
       </section>
     </div>
@@ -352,17 +454,22 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); stopLogin(); clearTimeou
     <div v-if="dialog === 'settings'" class="modal-overlay" @mousedown.self="dialog = null">
       <section class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <div class="modal-header"><div><span class="eyebrow">MAKE IT YOURS</span><h2 id="settings-title">偏好设置</h2></div><button class="icon-button" aria-label="关闭设置" @click="dialog = null"><X :size="20" /></button></div>
-        <div class="settings-tabs"><button :class="{ active: settingsTab === 'download' }" @click="settingsTab = 'download'"><SlidersHorizontal :size="15" />下载设置</button><button :class="{ active: settingsTab === 'account' }" @click="settingsTab = 'account'"><UserRound :size="15" />B站账号</button></div>
+        <div class="settings-tabs"><button :class="{ active: settingsTab === 'download' }" @click="settingsTab = 'download'"><SlidersHorizontal :size="15" />下载设置</button><button :class="{ active: settingsTab === 'account' }" @click="settingsTab = 'account'"><UserRound :size="15" />平台账号</button></div>
         <div v-if="settingsTab === 'download'" class="settings-content">
           <label class="field-label">下载位置</label><div class="folder-field"><FolderOpen :size="17" /><input v-model="settingsDraft.downloadDir" placeholder="选择本地文件夹" aria-label="下载位置" /><button @click="chooseFolder">浏览</button></div>
-          <div class="settings-two-col"><label><span class="field-label">同时下载任务数</span><select v-model.number="settingsDraft.concurrency"><option v-for="n in 4" :key="n" :value="n">{{ n }} 个任务</option></select></label><label><span class="field-label">单任务限速（MB/s）</span><input v-model.number="settingsDraft.maxSpeedMbps" type="number" min="0" max="1024" /><small>设为 0 表示不限速</small></label></div>
-          <div class="settings-divider"></div><h3 class="settings-section-title">顺便一起收藏</h3><p class="settings-description">可用时，与视频保存在同一文件夹。</p>
+          <div class="settings-two-col"><div><span class="field-label">同时下载任务数</span><UiSelect :model-value="settingsDraft.concurrency" :options="concurrencyOptions" label="同时下载任务数" @update:model-value="value => settingsDraft.concurrency = Number(value)" /></div><label><span class="field-label">单任务限速（MB/s）</span><input v-model.number="settingsDraft.maxSpeedMbps" type="number" min="0" max="1024" /><small>设为 0 表示不限速</small></label></div>
+          <div class="settings-divider"></div><h3 class="settings-section-title">剪贴板与快速解析</h3>
+          <label class="toggle-row"><span><ClipboardPaste :size="17" /><span>识别剪贴板链接<small>回到软件时检查，仅识别支持的平台链接</small></span></span><input v-model="settingsDraft.clipboardEnabled" type="checkbox" role="switch" /></label>
+          <label class="toggle-row"><span><Link2 :size="17" /><span>识别后自动解析<small>默认仅提示；开启后自动打开下载选择</small></span></span><input v-model="settingsDraft.clipboardAutoParse" :disabled="!settingsDraft.clipboardEnabled" type="checkbox" role="switch" /></label>
+          <div class="settings-divider"></div><h3 class="settings-section-title">顺便一起收藏</h3><p class="settings-description">可用时，与视频保存在同一文件夹。弹幕与字幕目前适用于B站。</p>
           <label class="toggle-row"><span><Film :size="17" /><span>保存视频封面<small>原始封面图片</small></span></span><input v-model="settingsDraft.saveCover" type="checkbox" role="switch" /></label>
           <label class="toggle-row"><span><FileText :size="17" /><span>保存弹幕<small>XML 格式</small></span></span><input v-model="settingsDraft.saveDanmaku" type="checkbox" role="switch" /></label>
           <label class="toggle-row"><span><FileText :size="17" /><span>保存字幕<small>SRT 格式，取决于视频是否提供字幕</small></span></span><input v-model="settingsDraft.saveSubtitles" type="checkbox" role="switch" /></label>
           <div :class="['component-status', { missing: !snapshot?.mediaReady }]"><CircleCheck v-if="snapshot?.mediaReady" :size="16" /><CircleAlert v-else :size="16" /><span>{{ snapshot?.mediaReady ? 'FFmpeg 音视频组件已就绪' : api.desktop ? '未找到 FFmpeg，请重新安装完整客户端。' : '界面预览模式，桌面端会检查 FFmpeg 组件。' }}</span></div>
         </div>
         <div v-else class="settings-content account-content">
+          <div class="account-platform-tabs"><button v-for="platform in platformList" :key="platform" :class="{ active: accountPlatform === platform }" @click="accountPlatform = platform">{{ platformLabels[platform] }}</button></div>
+          <template v-if="accountPlatform === 'bilibili'">
           <template v-if="snapshot?.authenticated && !loginQr && loginState === 'idle'">
             <div class="account-illustration account-avatar"><img v-if="snapshot.auth.account?.avatar" :src="snapshot.auth.account.avatar" alt="B站头像" referrerpolicy="no-referrer" /><UserRound v-else :size="25" /></div>
             <h3>{{ snapshot.auth.account?.name || 'B站账号' }}</h3>
@@ -387,11 +494,21 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); stopLogin(); clearTimeou
             <button v-if="snapshot?.authenticated" class="text-button login-back" @click="stopLogin">返回当前账号</button>
           </template>
           <div class="login-privacy"><ShieldCheck :size="16" /><span>登录状态由 Windows 加密，仅供当前系统用户使用。B站会话失效后需重新扫码。</span></div>
+          </template>
+          <template v-else>
+            <div class="account-illustration"><UserRound :size="25" /></div>
+            <h3>{{ platformLabels[accountPlatform] }}官方网页会话</h3>
+            <span v-if="siteSessionSaved" class="login-saved"><ShieldCheck :size="14" />已加密保存网页会话</span>
+            <p>打开官方页面并播放当前视频，关闭该窗口后会返回软件自动解析。也可切回这里手动保存会话。各平台账号分别保存。</p>
+            <div class="site-login-actions"><button class="button secondary" @click="openSiteLogin"><ExternalLink :size="15" />打开官方页面</button><button class="button primary" :disabled="savingSettings" @click="saveSiteSession()"><ShieldCheck :size="15" />{{ detectedSource?.platform === accountPlatform ? '保存会话并重试' : '保存网页会话' }}</button></div>
+            <button v-if="siteSessionSaved" class="text-button clear-site-session" :disabled="savingSettings" @click="saveSiteSession(true)">清除软件保存的此平台会话</button>
+            <div class="login-privacy"><ShieldCheck :size="16" /><span>各平台会话分别加密保存，失效后可更新。官方网页中的账号可在该页面退出；清除软件会话不会替你操作官方账号。</span></div>
+          </template>
         </div>
         <div v-if="settingsTab === 'download'" class="modal-footer"><span>设置适用于之后创建的新任务</span><button class="button primary" :disabled="savingSettings" @click="saveSettings"><Check :size="16" />保存设置</button></div>
       </section>
     </div>
 
-    <div v-if="dialog === 'about'" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.1' }}</span><div class="about-description">专注B站视频的本地下载工具。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="dialog = null">开始收藏<ExternalLink :size="14" /></button></section></div>
+    <div v-if="dialog === 'about'" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.2' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="dialog = null">开始收藏<ExternalLink :size="14" /></button></section></div>
   </div>
 </template>

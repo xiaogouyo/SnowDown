@@ -165,6 +165,8 @@ pub async fn inspect(input: &str, cookie: &str) -> Result<VideoInfo, String> {
     let bvid = data["bvid"].as_str().ok_or("视频标识缺失")?.to_string();
     let play = play_info(&client, &bvid, cid, 127).await?;
     Ok(VideoInfo {
+        platform: crate::model::Platform::Bilibili,
+        source_url: format!("https://www.bilibili.com/video/{bvid}?p={selected_page}"),
         bvid,
         title: data["title"].as_str().unwrap_or("未命名视频").into(),
         cover: data["pic"]

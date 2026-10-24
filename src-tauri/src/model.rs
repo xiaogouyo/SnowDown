@@ -8,6 +8,43 @@ pub fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Platform {
+    #[default]
+    Bilibili,
+    Douyin,
+    Xiaohongshu,
+}
+
+impl Platform {
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Bilibili => "bilibili",
+            Self::Douyin => "douyin",
+            Self::Xiaohongshu => "xiaohongshu",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Bilibili => "B站",
+            Self::Douyin => "抖音",
+            Self::Xiaohongshu => "小红书",
+        }
+    }
+    pub fn home(self) -> &'static str {
+        match self {
+            Self::Bilibili => "https://www.bilibili.com/",
+            Self::Douyin => "https://www.douyin.com/",
+            Self::Xiaohongshu => "https://www.xiaohongshu.com/",
+        }
+    }
+}
+
+fn enabled() -> bool {
+    true
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -17,6 +54,10 @@ pub struct Settings {
     pub save_cover: bool,
     pub save_danmaku: bool,
     pub save_subtitles: bool,
+    #[serde(default = "enabled")]
+    pub clipboard_enabled: bool,
+    #[serde(default)]
+    pub clipboard_auto_parse: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -38,6 +79,10 @@ pub struct Quality {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VideoInfo {
+    #[serde(default)]
+    pub platform: Platform,
+    #[serde(default)]
+    pub source_url: String,
     pub bvid: String,
     pub title: String,
     pub cover: String,
@@ -70,6 +115,10 @@ pub enum OutputFormat {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadTask {
+    #[serde(default)]
+    pub platform: Platform,
+    #[serde(default)]
+    pub source_url: String,
     pub id: String,
     pub bvid: String,
     pub cid: u64,
@@ -103,6 +152,7 @@ pub struct AppSnapshot {
     pub media_ready: bool,
     pub authenticated: bool,
     pub auth: crate::auth::AuthStatus,
+    pub site_sessions: Vec<crate::site_sessions::SessionStatus>,
     pub version: String,
 }
 
@@ -146,6 +196,15 @@ pub fn safe_filename(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_settings_and_video_records_keep_bilibili_defaults() {
+        let settings: Settings = serde_json::from_value(serde_json::json!({"downloadDir":"D:\\videos","concurrency":2,"maxSpeedMbps":0,"saveCover":false,"saveDanmaku":false,"saveSubtitles":false})).unwrap();
+        assert!(settings.clipboard_enabled);
+        assert!(!settings.clipboard_auto_parse);
+        let video: VideoInfo = serde_json::from_value(serde_json::json!({"bvid":"BV1xx411c7mD","title":"legacy","cover":"","author":"","duration":1,"pages":[],"qualities":[],"selectedCid":1})).unwrap();
+        assert_eq!(video.platform, Platform::Bilibili);
+        assert!(video.source_url.is_empty());
+    }
     #[test]
     fn filenames_are_windows_safe() {
         assert_eq!(safe_filename("试验: A/B?*... "), "试验_ A_B__");

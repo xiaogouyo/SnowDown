@@ -1,5 +1,7 @@
 export type TaskStatus = 'queued' | 'downloading' | 'merging' | 'paused' | 'completed' | 'failed' | 'cancelled'
 export type OutputFormat = 'video' | 'audio'
+export type Platform = 'bilibili' | 'douyin' | 'xiaohongshu'
+export interface SourceLink { platform: Platform; url: string }
 
 export interface Settings {
   downloadDir: string
@@ -8,11 +10,15 @@ export interface Settings {
   saveCover: boolean
   saveDanmaku: boolean
   saveSubtitles: boolean
+  clipboardEnabled: boolean
+  clipboardAutoParse: boolean
 }
 
 export interface VideoPage { cid: number; page: number; part: string; duration: number }
 export interface Quality { id: number; label: string; width: number; height: number }
 export interface VideoInfo {
+  platform: Platform
+  sourceUrl: string
   bvid: string
   title: string
   cover: string
@@ -24,6 +30,8 @@ export interface VideoInfo {
 }
 
 export interface DownloadTask {
+  platform: Platform
+  sourceUrl: string
   id: string
   bvid: string
   cid: number
@@ -55,6 +63,7 @@ export interface AppSnapshot {
   mediaReady: boolean
   authenticated: boolean
   auth: { state: 'loggedout' | 'checking' | 'authenticated' | 'expired' | 'offline'; account: { uid: number; name: string; avatar: string } | null; message: string | null }
+  siteSessions: { platform: Platform; saved: boolean }[]
   version: string
 }
 

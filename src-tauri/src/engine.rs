@@ -1,4 +1,4 @@
-use crate::{bilibili, model::*, AppState};
+use crate::{bilibili, model::*, sites, AppState};
 use futures_util::StreamExt;
 use reqwest::{header, Client, StatusCode};
 use serde_json::Value;
@@ -127,6 +127,35 @@ fn select_streams(data: &Value, quality: u32, audio_only: bool) -> Result<Vec<St
     segments.iter().map(bilibili::media_url).collect()
 }
 
+pub(crate) fn media_client(platform: Platform) -> Result<Client, String> {
+    Client::builder()
+        .user_agent(bilibili::USER_AGENT)
+        .default_headers({
+            let mut headers = header::HeaderMap::new();
+            headers.insert(
+                header::REFERER,
+                header::HeaderValue::from_static(platform.home()),
+            );
+            headers
+        })
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= 10 {
+                return attempt.error("媒体跳转次数过多");
+            }
+            if platform == Platform::Bilibili
+                || sites::media_url(platform, attempt.url().as_str()).is_ok()
+            {
+                attempt.follow()
+            } else {
+                attempt.error("媒体跳转到非所属平台")
+            }
+        }))
+        .connect_timeout(Duration::from_secs(15))
+        .read_timeout(Duration::from_secs(35))
+        .build()
+        .map_err(|_| "无法初始化媒体下载组件。".into())
+}
+
 async fn run_task(
     app: &AppHandle,
     state: &Arc<AppState>,
@@ -138,23 +167,58 @@ async fn run_task(
         .ffmpeg
         .as_ref()
         .ok_or("未找到 FFmpeg。请在设置中检查组件，或重新安装完整客户端。")?;
-    let cookie = state.auth.cookie();
+    let cookie = if task.platform == Platform::Bilibili {
+        state.auth.cookie()
+    } else {
+        String::new()
+    };
     let api_client = bilibili::client(&cookie)?;
-    let media_client = Client::builder()
-        .user_agent(bilibili::USER_AGENT)
-        .connect_timeout(Duration::from_secs(15))
-        .read_timeout(Duration::from_secs(35))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let play = bilibili::play_info(&api_client, &task.bvid, task.cid, task.quality).await?;
-    check_cancel(cancel)?;
-    let actual_quality = bilibili::qualities(&play)
-        .into_iter()
-        .find(|q| q.id <= task.quality)
-        .map(|q| q.id)
-        .unwrap_or(task.quality);
-    let urls = select_streams(&play, task.quality, task.format == OutputFormat::Audio)?;
-    let is_dash = play["dash"].is_object();
+    let media_client = media_client(task.platform)?;
+    let (urls, is_dash, actual_quality, quality_label) = if task.platform == Platform::Bilibili {
+        let play = bilibili::play_info(&api_client, &task.bvid, task.cid, task.quality).await?;
+        check_cancel(cancel)?;
+        let actual_quality = bilibili::qualities(&play)
+            .into_iter()
+            .find(|q| q.id <= task.quality)
+            .map(|q| q.id)
+            .unwrap_or(task.quality);
+        (
+            select_streams(&play, task.quality, task.format == OutputFormat::Audio)?,
+            play["dash"].is_object(),
+            actual_quality,
+            bilibili::quality_label(actual_quality).to_string(),
+        )
+    } else {
+        let source = sites::recognize(&task.source_url)?;
+        if source.platform != task.platform {
+            return Err("下载任务的平台与来源不一致。".into());
+        }
+        let resolved = state
+            .site_sessions
+            .resolve(app, &source, task.quality)
+            .await?;
+        check_cancel(cancel)?;
+        let label = resolved
+            .info
+            .qualities
+            .iter()
+            .find(|q| q.id == resolved.quality)
+            .map(|q| q.label.clone())
+            .unwrap_or_else(|| "原始画质".into());
+        let (urls, dash) = if let Some(audio) = resolved.audio_url {
+            (
+                if task.format == OutputFormat::Audio {
+                    vec![audio]
+                } else {
+                    vec![resolved.url, audio]
+                },
+                true,
+            )
+        } else {
+            (vec![resolved.url], false)
+        };
+        (urls, dash, resolved.quality, label)
+    };
     let directory = PathBuf::from(&task.download_dir);
     let temp_dir = directory.join(".snowdown").join(&task.id);
     fs::create_dir_all(&temp_dir)
@@ -165,7 +229,6 @@ async fn run_task(
         check_cancel(cancel)?;
         let size = media_client
             .head(url)
-            .header(header::REFERER, "https://www.bilibili.com/")
             .send()
             .await
             .ok()
@@ -182,7 +245,7 @@ async fn run_task(
     let total: u64 = sizes.iter().sum();
     let _ = state.patch_task(app, &task.id, |t| {
         if !cancel.load(Ordering::Relaxed) {
-            t.quality_label = bilibili::quality_label(actual_quality).into();
+            t.quality_label = quality_label;
             t.status = TaskStatus::Downloading;
             t.error = None;
             t.total_bytes = total;
@@ -230,7 +293,7 @@ async fn run_task(
     let stem = format!(
         "{} [{}_P{}]-{}",
         safe_filename(&task.title),
-        task.bvid,
+        format!("{}_{}", task.platform.key(), task.bvid),
         task.page,
         &task.id[..8]
     );
@@ -335,7 +398,7 @@ async fn run_task(
             _ => warnings.push("封面获取失败".into()),
         }
     }
-    if task.save_danmaku {
+    if task.platform == Platform::Bilibili && task.save_danmaku {
         let result = async {
             let response = media_client
                 .get(format!("https://comment.bilibili.com/{}.xml", task.cid))
@@ -354,7 +417,7 @@ async fn run_task(
             warnings.push("弹幕保存失败".into());
         }
     }
-    if task.save_subtitles {
+    if task.platform == Platform::Bilibili && task.save_subtitles {
         match bilibili::subtitles(&api_client, &task.bvid, task.cid).await {
             Ok(items) => {
                 if items.is_empty() {
@@ -430,9 +493,7 @@ pub async fn transfer<F: FnMut(u64, u64, u64)>(
     mut progress: F,
 ) -> Result<u64, String> {
     let mut offset = fs::metadata(path).await.map(|m| m.len()).unwrap_or(0);
-    let mut request = client
-        .get(url)
-        .header(header::REFERER, "https://www.bilibili.com/");
+    let mut request = client.get(url);
     if offset > 0 {
         request = request.header(header::RANGE, format!("bytes={offset}-"));
         if let Ok(etag) = fs::read_to_string(path.with_extension("etag")).await {
@@ -721,12 +782,7 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("snowdown-live-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&directory).await.unwrap();
-        let client = Client::builder()
-            .user_agent(bilibili::USER_AGENT)
-            .connect_timeout(Duration::from_secs(15))
-            .read_timeout(Duration::from_secs(30))
-            .build()
-            .unwrap();
+        let client = media_client(Platform::Bilibili).unwrap();
         let cancel = AtomicBool::new(false);
         let mut files = Vec::new();
         for (index, url) in urls.iter().enumerate() {

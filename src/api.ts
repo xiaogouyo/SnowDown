@@ -2,15 +2,16 @@ import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import type { AppSnapshot, CreateTaskRequest, Settings, VideoInfo, LoginQr, LoginPoll } from './types'
+import type { AppSnapshot, CreateTaskRequest, Settings, VideoInfo, LoginQr, LoginPoll, Platform, SourceLink } from './types'
 
 export const desktop = isTauri()
 
 export async function getSnapshot(): Promise<AppSnapshot> {
   if (!desktop) return {
     tasks: [],
-    settings: { downloadDir: '', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false },
-    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.1',
+    settings: { downloadDir: '', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
+    siteSessions: [],
+    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.2',
   }
   return invoke('get_snapshot')
 }
@@ -44,6 +45,18 @@ export async function pollLogin(id: string): Promise<LoginPoll> { requireDesktop
 export async function cancelLogin(): Promise<void> { if (desktop) await invoke('cancel_login') }
 export async function logout(): Promise<void> { requireDesktop(); await invoke('logout') }
 export async function checkLogin(): Promise<void> { requireDesktop(); await invoke('check_login') }
+export async function readClipboardLink(): Promise<SourceLink | null> { requireDesktop(); return invoke('read_clipboard_link') }
+export async function openSiteSession(platform: Platform, input?: string): Promise<void> { requireDesktop(); await invoke('open_site_session', { platform, input: input ?? null }) }
+export async function captureSiteSession(platform: Platform): Promise<void> { requireDesktop(); await invoke('capture_site_session', { platform }) }
+export async function clearSiteSession(platform: Platform): Promise<void> { requireDesktop(); await invoke('clear_site_session', { platform }) }
+export async function watchFocus(callback: () => void): Promise<() => void> {
+  if (!desktop) return () => {}
+  return getCurrentWindow().onFocusChanged(({ payload }) => { if (payload) callback() })
+}
+export async function watchSiteReturn(callback: (platform: Platform, input?: string) => void): Promise<() => void> {
+  if (!desktop) return () => {}
+  return listen<{ platform: Platform; input: string | null }>('snowdown://site-return', ({ payload }) => callback(payload.platform, payload.input ?? undefined))
+}
 
 export async function windowAction(action: 'minimize' | 'maximize' | 'close'): Promise<void> {
   requireDesktop()

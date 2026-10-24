@@ -418,7 +418,7 @@ fn save(path: &std::path::Path, credentials: &Credentials) -> Result<(), String>
 }
 
 #[cfg(windows)]
-fn crypt(bytes: &[u8], encrypt: bool) -> Result<Vec<u8>, String> {
+pub(crate) fn crypt(bytes: &[u8], encrypt: bool) -> Result<Vec<u8>, String> {
     use windows_sys::Win32::{
         Foundation::LocalFree,
         Security::Cryptography::{
@@ -466,7 +466,7 @@ fn crypt(bytes: &[u8], encrypt: bool) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(not(windows))]
-fn crypt(_: &[u8], _: bool) -> Result<Vec<u8>, String> {
+pub(crate) fn crypt(_: &[u8], _: bool) -> Result<Vec<u8>, String> {
     Err("当前版本的登录持久化仅支持 Windows。".into())
 }
 

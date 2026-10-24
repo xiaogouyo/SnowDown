@@ -96,6 +96,8 @@ mod tests {
     fn settings_roundtrip() {
         let store = Storage::open(Path::new(":memory:")).unwrap();
         let settings = Settings {
+            clipboard_enabled: true,
+            clipboard_auto_parse: false,
             download_dir: "D:\\视频".into(),
             concurrency: 2,
             max_speed_mbps: 0,

@@ -73,7 +73,7 @@
       </Viewbox>
       <TextBlock Canvas.Left="630" Canvas.Top="187" FontFamily="Segoe UI" FontSize="44" FontWeight="Bold" Foreground="#254366">SnowDown<TextBlock Foreground="#7CAEF2">.</TextBlock></TextBlock>
       <TextBlock Canvas.Left="635" Canvas.Top="250" FontSize="19" Foreground="#8099BC" Text="好内容，慢慢收藏。"/>
-      <TextBlock Canvas.Left="635" Canvas.Top="296" FontSize="13" Foreground="#96AAC4" Text="B站视频 · 音频 · 字幕 · 弹幕"/>
+      <TextBlock Canvas.Left="635" Canvas.Top="296" FontSize="13" Foreground="#96AAC4" Text="B站 · 抖音 · 小红书 · 本地收藏"/>
 
       <Grid x:Name="ReadyPanel" Canvas.Left="566" Canvas.Top="358" Width="370" Height="85">
         <Grid.RowDefinitions><RowDefinition Height="24"/><RowDefinition Height="42"/><RowDefinition Height="19"/></Grid.RowDefinitions>
