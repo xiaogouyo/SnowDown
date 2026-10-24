@@ -8,6 +8,10 @@ function visibleElements() {
 const qr = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=='
 afterEach(() => { document.body.innerHTML = ''; vi.restoreAllMocks(); vi.useRealTimers(); delete (window as unknown as Record<string, unknown>).__snowdownQrRequested })
 describe('official QR capture boundaries', () => {
+  it('captures only the logged-in account avatar and name',()=>{
+    visibleElements();document.body.innerHTML='<header><a href="/user/self" title="我的账号"><img src="https://p3.douyinpic.com/avatar.jpg" alt="头像"></a></header><img src="https://unrelated.test/author.jpg">';
+    expect(read()).toMatchObject({state:'confirmed',account:{name:'我的账号',avatar:'https://p3.douyinpic.com/avatar.jpg'}})
+  })
   it('captures the Douyin QR image near the scan-login text without reading the phone form', () => {
     visibleElements()
     document.body.innerHTML = `<section><h3>扫码登录</h3><div><div><img class="RhjdbXj8" src="${qr}"></div><span>如何扫码</span></div></section><input value="private-phone"><p>无关页面文字</p>`

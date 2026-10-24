@@ -99,6 +99,7 @@ fn prepare(
                 continue;
             }
             added.push(DownloadTask {
+                resource: None,
                 platform: request.video.platform,
                 source_url: request.video.source_url.clone(),
                 id: uuid::Uuid::new_v4().to_string(),

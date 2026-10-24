@@ -11,7 +11,7 @@ export async function getSnapshot(): Promise<AppSnapshot> {
     tasks: [],
     settings: { downloadDir: '', concurrency: 2, downloadConnections: 8, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
     siteSessions: [],
-    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.10',
+    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.2.0',
   }
   return invoke('get_snapshot')
 }
@@ -100,6 +100,9 @@ export async function downloadUpdate(): Promise<UpdateStatus> { requireDesktop()
 export async function deferUpdate(): Promise<UpdateStatus> { requireDesktop(); return invoke('defer_update') }
 export async function cancelUpdateDownload(): Promise<void> { requireDesktop(); await invoke('cancel_update_download') }
 export async function installUpdate(): Promise<void> { requireDesktop(); await invoke('install_update') }
+export async function dismissUpdateNotice(): Promise<void> { requireDesktop(); await invoke('dismiss_update_notice') }
+export async function browserStatus(): Promise<{id:string;name:string;installed:boolean;connected:boolean}[]> { requireDesktop(); return invoke('browser_status') }
+export async function installBrowserExtension(browser:string): Promise<string> { requireDesktop(); return invoke('install_browser_extension',{browser}) }
 export async function openUpdateRelease(): Promise<void> { requireDesktop(); await invoke('open_update_release') }
 export async function subscribeUpdates(callback: (status: UpdateStatus) => void): Promise<() => void> {
   if (!desktop) return () => {}

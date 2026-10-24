@@ -37,9 +37,8 @@ namespace SnowDown.Setup
                     preview.ExportPreview(args[0].Substring("--render-preview=".Length), args.Length > 1 ? args[1] : "ready");
                     return 0;
                 }
-                foreach (string argument in args)
-                    if (argument == "/S") return SilentInstall(args);
                 string updateDirectory = InstallerCore.UpdateDirectory(args);
+                InstallerCore.AutomaticUpdate(args);
                 InstallerCore.WaitForUpdatingClient(args);
                 using (Mutex mutex = new Mutex(false, @"Local\SnowDown-Setup-CurrentUser"))
                 {
@@ -47,7 +46,9 @@ namespace SnowDown.Setup
                     try
                     {
                         try { owns = mutex.WaitOne(0); } catch (AbandonedMutexException) { owns = true; }
-                        if (!owns) return 0;
+                        if (!owns) return 21;
+                        if (updateDirectory != null || Array.Exists(args, argument => argument == "/S"))
+                            return SilentInstall(args, updateDirectory);
                         Application application = new Application();
                         SetupWindow setup = new SetupWindow(false, updateDirectory);
                         return application.Run(setup.Window);
@@ -63,21 +64,23 @@ namespace SnowDown.Setup
             }
         }
 
-        private static int SilentInstall(string[] args)
+        private static int SilentInstall(string[] args, string updateDirectory)
         {
-            string directory = InstallerCore.DefaultDirectory();
+            string directory = updateDirectory ?? InstallerCore.DefaultDirectory();
             foreach (string argument in args)
                 if (argument.StartsWith("/D=", StringComparison.Ordinal)) directory = argument.Substring(3);
             InstallerCore.CheckDirectory(directory);
+            string previous = InstallerCore.ReadInstalledManifest(directory);
             string temporary = NewTemporaryDirectory();
             try
             {
                 string payload = InstallerCore.ExtractPayload(temporary);
-                using (Process backend = InstallerCore.StartBackend(payload, directory, Path.Combine(temporary, "stage")))
+                using (Process backend = InstallerCore.StartBackend(payload, directory, Path.Combine(temporary, "stage"), updateDirectory != null))
                 {
                     backend.WaitForExit();
                     if (backend.ExitCode != 0 && backend.ExitCode != 3010) return backend.ExitCode;
-                    InstallerCore.VerifyInstalled(directory);
+                    InstallerCore.FinalizeInstalled(directory, previous);
+                    if (updateDirectory != null) Process.Start(new ProcessStartInfo(Path.Combine(directory,"snowdown.exe")) { UseShellExecute = true, WorkingDirectory = directory });
                     return backend.ExitCode;
                 }
             }
@@ -195,6 +198,7 @@ namespace SnowDown.Setup
             try
             {
                 installedDirectory = InstallerCore.NormalizePath(installPath.Text);
+                string previous = InstallerCore.ReadInstalledManifest(installedDirectory);
                 InstallerCore.CheckDirectory(installedDirectory);
                 SetBusy();
                 string statusFile = Path.Combine(temporary, "stage");
@@ -220,7 +224,7 @@ namespace SnowDown.Setup
                     string stage = File.Exists(statusFile) ? File.ReadAllText(statusFile).Trim() : "failed";
                     throw new IOException(stage == "running" ? InstallerCore.StageText(stage) : "安装未完成（" + exitCode + "），请检查磁盘空间和文件权限后重试。");
                 }
-                InstallerCore.VerifyInstalled(installedDirectory);
+                InstallerCore.FinalizeInstalled(installedDirectory,previous);
                 SetComplete();
                 if (exitCode == 3010) status.Text = "组件更新将在重新启动 Windows 后完成。";
             }

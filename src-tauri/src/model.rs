@@ -121,6 +121,8 @@ pub enum OutputFormat {
 #[serde(rename_all = "camelCase")]
 pub struct DownloadTask {
     #[serde(default)]
+    pub resource: Option<ResourceSpec>,
+    #[serde(default)]
     pub platform: Platform,
     #[serde(default)]
     pub source_url: String,
@@ -161,6 +163,11 @@ pub struct DownloadTask {
     pub start_interval_secs: u32,
     #[serde(default)]
     pub not_before: u64,
+}
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ResourceSpec {
+    pub url: String,
+    pub extension: String,
 }
 
 #[derive(Clone, Serialize)]

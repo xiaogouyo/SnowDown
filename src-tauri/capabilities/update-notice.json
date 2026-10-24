@@ -1,0 +1,1 @@
+{"$schema":"../gen/schemas/desktop-schema.json","identifier":"update-notice","description":"Local update ready notification","windows":["update-notice"],"permissions":["core:default"]}

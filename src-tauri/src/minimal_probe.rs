@@ -16,7 +16,7 @@ async fn wait(app: &AppHandle, script: &str, ticks: usize) -> bool {
 
 async fn progress(value: Value) {
     let _ = tokio::fs::write(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/v0110-qa-progress.json"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/v020-qa-progress.json"),
         serde_json::to_vec_pretty(&value).unwrap(),
     )
     .await;
@@ -26,6 +26,10 @@ async fn progress(value: Value) {
 // This uses the WebView2 renderer, not screen scraping or another application's UI.
 #[cfg(windows)]
 async fn capture(app: &AppHandle, name: &str) -> bool {
+    capture_label(app, "main", name).await
+}
+#[cfg(windows)]
+pub(crate) async fn capture_label(app: &AppHandle, label: &str, name: &str) -> bool {
     use webview2_com::{
         CapturePreviewCompletedHandler,
         Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
@@ -42,7 +46,7 @@ async fn capture(app: &AppHandle, name: &str) -> bool {
             stream: *mut *mut std::ffi::c_void,
         ) -> i32;
     }
-    let Some(window) = app.get_webview_window("main") else {
+    let Some(window) = app.get_webview_window(label) else {
         return false;
     };
     let (sender, receiver) = tokio::sync::oneshot::channel();
@@ -90,7 +94,7 @@ async fn capture(app: &AppHandle, name: &str) -> bool {
     let Ok(Ok(bytes)) = tokio::time::timeout(Duration::from_secs(10), receiver).await else {
         return false;
     };
-    let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/v0110-screenshots");
+    let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/v020-screenshots");
     let _ = tokio::fs::create_dir_all(&directory).await;
     tokio::fs::write(directory.join(format!("{name}.png")), bytes)
         .await
@@ -152,7 +156,7 @@ pub fn start(app: AppHandle) {
             let failure = json!({"success":false,"stage":"parse did not complete","center":center,"ui":evaluate(&app,"document.body.innerText").await});
             let _ = tokio::fs::write(
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("../.tools/v0110-minimal-verification.json"),
+                    .join("../.tools/v020-minimal-verification.json"),
                 serde_json::to_vec_pretty(&failure).unwrap(),
             )
             .await;
@@ -310,6 +314,13 @@ pub fn start(app: AppHandle) {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
         let verified = update_ready && state.updater.verified_installer().await.is_ok();
+        let notice_visible=app.get_webview_window("update-notice").is_some_and(|w|w.is_visible().ok()==Some(true));
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let notice_image=capture_label(&app,"update-notice","update-notice").await;
+        let notice_ui=crate::batch_probe::evaluate_window(&app,"update-notice","JSON.stringify({text:document.body.innerText,overflow:document.documentElement.scrollWidth>innerWidth||document.documentElement.scrollHeight>innerHeight})").await;
+        let _=crate::batch_probe::evaluate_window(&app,"update-notice","document.querySelector('[aria-label=\"稍后更新\"]')?.click();true").await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let notice_dismissed=app.get_webview_window("update-notice").is_some_and(|w|w.is_visible().ok()==Some(false));
         let _ = window.show();
         let _ = window.set_focus();
         tokio::time::sleep(Duration::from_millis(400)).await;
@@ -349,11 +360,11 @@ pub fn start(app: AppHandle) {
             && panel_closed
             && hidden_active
             && verified
-            && update_restored;
-        let report = json!({"success":success,"center":center,"animationMiddleTop":middle,"top":top,"minimum":minimum,"animation":animation,"parsed":parsed,"mediaComplete":media_complete,"mediaError":media_error,"inlineProgress":inline_progress,"updatePaused":update_paused,"pausedUi":paused_ui,"mediaConnections":state.tasks.lock().unwrap().first().map(|task|task.peak_connections),"updateResumedBytes":state.updater.status().resumed_bytes,"updateAvailable":update_available,"updateStarted":started,"startUi":start_ui,"panelClosed":panel_closed,"hiddenUpdateContinued":hidden_active,"updateReady":update_ready,"installerHashVerified":verified,"installerExecuted":false,"updateRestored":update_restored,"updateError":update_error,"screenshots":{"empty":empty_image,"parsed":result_image,"minimum":minimum_image,"downloaded":media_image,"updateReady":update_image},"systemClipboardModified":false});
+            && update_restored && notice_visible && notice_image && notice_dismissed;
+        let report = json!({"success":success,"center":center,"animationMiddleTop":middle,"top":top,"minimum":minimum,"animation":animation,"parsed":parsed,"mediaComplete":media_complete,"mediaError":media_error,"inlineProgress":inline_progress,"updatePaused":update_paused,"pausedUi":paused_ui,"mediaConnections":state.tasks.lock().unwrap().first().map(|task|task.peak_connections),"updateResumedBytes":state.updater.status().resumed_bytes,"noticeVisible":notice_visible,"noticeImage":notice_image,"noticeDismissed":notice_dismissed,"noticeUi":notice_ui,"updateAvailable":update_available,"updateStarted":started,"startUi":start_ui,"panelClosed":panel_closed,"hiddenUpdateContinued":hidden_active,"updateReady":update_ready,"installerHashVerified":verified,"installerExecuted":false,"updateRestored":update_restored,"updateError":update_error,"screenshots":{"empty":empty_image,"parsed":result_image,"minimum":minimum_image,"downloaded":media_image,"updateReady":update_image},"systemClipboardModified":false});
         let _ = tokio::fs::write(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../.tools/v0110-minimal-verification.json"),
+                .join("../.tools/v020-minimal-verification.json"),
             serde_json::to_vec_pretty(&report).unwrap(),
         )
         .await;

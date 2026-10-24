@@ -30,7 +30,15 @@
   const profile = platform === 'xiaohongshu'
     ? [...document.querySelectorAll('a[href*="/user/profile/"]')].some(node => visible(node) && /^\/user\/profile\/[a-f\d]{24}(?:$|[/?])/i.test(node.getAttribute('href')) && /^(我|我的|个人主页)$/.test(node.textContent.trim()))
     : !![...document.querySelectorAll('header a[href*="/user/"],[data-e2e="user-avatar"],[data-e2e="user-info"]')].find(visible);
-  if (profile && !candidate && !loginButton && document.readyState !== 'loading') return JSON.stringify({state:'confirmed'});
+  if (profile && !candidate && !loginButton && document.readyState !== 'loading') {
+    const root = platform === 'xiaohongshu'
+      ? [...document.querySelectorAll('a[href*="/user/profile/"]')].find(node => /^(我|我的|个人主页)$/.test(node.textContent.trim()))
+      : document.querySelector('[data-e2e="user-avatar"],[data-e2e="user-info"],header a[href*="/user/"]');
+    const img = root?.querySelector('img') || (root?.tagName === 'IMG' ? root : null);
+    const avatar = img?.currentSrc || img?.src || '';
+    const name = root?.getAttribute('title') || img?.getAttribute('alt') || '';
+    return JSON.stringify({state:'confirmed',...(avatar ? {account:{name:name.slice(0,80),avatar}} : {})});
+  }
   if (/已过期|已失效|二维码失效|二维码过期/.test(text)) return JSON.stringify({state:'expired'});
   if (!candidate && /扫码成功|扫描成功|请在.{0,12}确认|已扫码/.test(text)) return JSON.stringify({state:'scanned'});
   let image = '';

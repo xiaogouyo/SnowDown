@@ -1,5 +1,5 @@
 use crate::{auth, model::Platform, sites};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     path::PathBuf,
@@ -13,11 +13,58 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 pub struct SessionStatus {
     pub platform: Platform,
     pub saved: bool,
+    pub account: Option<Profile>,
+}
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct Profile {
+    pub name: String,
+    pub avatar: String,
+}
+impl Profile {
+    pub fn sanitized(self) -> Self {
+        let avatar = url::Url::parse(if self.avatar.len() <= 4096 {
+            &self.avatar
+        } else {
+            ""
+        })
+        .ok()
+        .filter(|url| {
+            url.scheme() == "https"
+                && url.username().is_empty()
+                && url.password().is_none()
+                && url.port().is_none()
+                && url.host_str().is_some_and(|host| {
+                    [
+                        "douyinpic.com",
+                        "douyin.com",
+                        "byteimg.com",
+                        "bytecdn.cn",
+                        "ibytedtos.com",
+                        "xhscdn.com",
+                        "xiaohongshu.com",
+                    ]
+                    .iter()
+                    .any(|suffix| sites::host_matches(host, suffix))
+                })
+        })
+        .map(|url| url.to_string())
+        .unwrap_or_default();
+        Self {
+            name: self
+                .name
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(80)
+                .collect(),
+            avatar,
+        }
+    }
 }
 
 pub struct Sessions {
     directory: PathBuf,
     cookies: Mutex<HashMap<Platform, String>>,
+    profiles: Mutex<HashMap<Platform, Profile>>,
     media: Mutex<HashMap<(Platform, String), (Instant, sites::Resolved)>>,
     observed: Mutex<Observed>,
     parsers: [tokio::sync::Mutex<()>; 2],
@@ -32,6 +79,7 @@ struct Observed {
 impl Sessions {
     pub fn open(directory: PathBuf) -> Self {
         let mut cookies = HashMap::new();
+        let mut profiles = HashMap::new();
         for platform in [Platform::Douyin, Platform::Xiaohongshu] {
             let path = directory.join(format!("{}.dat", platform.key()));
             if std::fs::metadata(&path)
@@ -53,9 +101,25 @@ impl Sessions {
                 }
             }
         }
+        for platform in [Platform::Douyin, Platform::Xiaohongshu] {
+            if cookies.contains_key(&platform) {
+                if let Ok(bytes) =
+                    std::fs::read(directory.join(format!("{}.profile.dat", platform.key())))
+                {
+                    if bytes.len() < 16 * 1024 {
+                        if let Ok(plain) = auth::crypt(&bytes, false) {
+                            if let Ok(profile) = serde_json::from_slice::<Profile>(&plain) {
+                                profiles.insert(platform, profile.sanitized());
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Self {
             directory,
             cookies: Mutex::new(cookies),
+            profiles: Mutex::new(profiles),
             media: Mutex::new(HashMap::new()),
             observed: Mutex::new(Observed::default()),
             parsers: [tokio::sync::Mutex::new(()), tokio::sync::Mutex::new(())],
@@ -157,8 +221,28 @@ impl Sessions {
             .map(|platform| SessionStatus {
                 platform,
                 saved: cookies.contains_key(&platform),
+                account: self.profiles.lock().unwrap().get(&platform).cloned(),
             })
             .collect()
+    }
+    pub fn remember_browser(
+        &self,
+        source: &sites::Source,
+        detail: &serde_json::Value,
+        quality: u32,
+    ) -> Result<sites::Resolved, String> {
+        let resolved = sites::from_detail(source, detail, quality)?;
+        let id = sites::video_id(source)?;
+        if resolved.info.bvid != id {
+            return Err("浏览器视频与目标链接不一致。".into());
+        }
+        let mut media = self.media.lock().unwrap();
+        media.retain(|_, (time, _)| time.elapsed() < Duration::from_secs(300));
+        if media.len() >= 100 {
+            media.clear();
+        }
+        media.insert((source.platform, id), (Instant::now(), resolved.clone()));
+        Ok(resolved)
     }
     pub fn save(&self, platform: Platform, cookie: String) -> Result<(), String> {
         if platform == Platform::Bilibili {
@@ -201,6 +285,11 @@ impl Sessions {
             Err(_) => return Err("无法清除已保存会话。".into()),
         }
         self.cookies.lock().unwrap().remove(&platform);
+        self.profiles.lock().unwrap().remove(&platform);
+        let _ = std::fs::remove_file(
+            self.directory
+                .join(format!("{}.profile.dat", platform.key())),
+        );
         if platform == Platform::Douyin {
             self.observed.lock().unwrap().details.clear();
         }
@@ -209,6 +298,66 @@ impl Sessions {
             .unwrap()
             .retain(|(site, _), _| *site != platform);
         Ok(())
+    }
+    pub fn save_profile(&self, platform: Platform, profile: Profile) -> Result<(), String> {
+        let profile = profile.sanitized();
+        if profile.avatar.is_empty() && profile.name.is_empty() {
+            return Ok(());
+        }
+        let bytes = auth::crypt(
+            &serde_json::to_vec(&profile).map_err(|_| "账号信息无效。")?,
+            true,
+        )?;
+        std::fs::create_dir_all(&self.directory).map_err(|_| "无法保存账号信息。")?;
+        std::fs::write(
+            self.directory
+                .join(format!("{}.profile.dat", platform.key())),
+            bytes,
+        )
+        .map_err(|_| "无法保存账号信息。")?;
+        self.profiles.lock().unwrap().insert(platform, profile);
+        Ok(())
+    }
+    pub fn import_browser(
+        &self,
+        app: &AppHandle,
+        platform: Platform,
+        cookie: String,
+    ) -> Result<(), String> {
+        if cookie.is_empty() || cookie.len() > 64 * 1024 || cookie.chars().any(char::is_control) {
+            return Err("浏览器会话无效。".into());
+        }
+        if platform == Platform::Bilibili {
+            return Err("B站使用专用登录模块。".into());
+        }
+        let window = login_window(app, platform)?;
+        let domain = if platform == Platform::Douyin {
+            ".douyin.com"
+        } else {
+            ".xiaohongshu.com"
+        };
+        for part in cookie.split(';') {
+            if let Some((key, value)) = part.trim().split_once('=') {
+                if key.is_empty()
+                    || key.len() > 256
+                    || !key
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
+                {
+                    continue;
+                }
+                let cookie = tauri::webview::Cookie::build((key.to_string(), value.to_string()))
+                    .domain(domain)
+                    .path("/")
+                    .secure(true)
+                    .http_only(true)
+                    .build();
+                window
+                    .set_cookie(cookie)
+                    .map_err(|_| "无法导入平台浏览器会话。")?;
+            }
+        }
+        self.save(platform, cookie)
     }
 
     pub async fn logout(&self, app: &AppHandle, platform: Platform) -> Result<(), String> {
@@ -573,16 +722,30 @@ mod tests {
         sessions
             .save(Platform::Xiaohongshu, "web_session=fake-xhs".into())
             .unwrap();
+        sessions
+            .save_profile(
+                Platform::Douyin,
+                Profile {
+                    name: "测试账号".into(),
+                    avatar: "https://p3.douyinpic.com/avatar.jpg".into(),
+                },
+            )
+            .unwrap();
         let bytes = std::fs::read(directory.join("douyin.dat")).unwrap();
         assert!(!String::from_utf8_lossy(&bytes).contains("fake-douyin"));
         let restored = Sessions::open(directory.clone());
         assert_eq!(restored.cookie(Platform::Douyin), "sessionid=fake-douyin");
+        assert_eq!(
+            restored.snapshot()[0].account.as_ref().unwrap().name,
+            "测试账号"
+        );
         assert_eq!(
             restored.cookie(Platform::Xiaohongshu),
             "web_session=fake-xhs"
         );
         restored.clear(Platform::Douyin).unwrap();
         assert!(!directory.join("douyin.dat").exists());
+        assert!(!directory.join("douyin.profile.dat").exists());
         assert!(directory.join("xiaohongshu.dat").exists());
         std::fs::remove_dir_all(directory).unwrap();
     }

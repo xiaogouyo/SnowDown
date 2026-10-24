@@ -1,6 +1,6 @@
 [package]
 name = "snowdown"
-version = "0.1.10"
+version = "0.2.0"
 description = "A thoughtful local-first video downloader"
 authors = ["SnowDown"]
 edition = "2021"

@@ -84,6 +84,39 @@ try {
     if ((Get-Content -LiteralPath $taskStage -Raw) -ne 'complete') { throw 'Backend completion phase missing.' }
     if (-not (Test-Path -LiteralPath $taskSentinel)) { throw 'Reinstall removed an unrelated user file.' }
     $taskBackend.Dispose()
+    # A harmless fixture verifies automatic restart without opening the user's real client.
+    $taskAutoSource = Join-Path $taskQaRoot 'AutoApp.cs'
+    [IO.File]::WriteAllText($taskAutoSource,'class AutoApp { static void Main(string[] args) { if(args.Length>0){System.Threading.Thread.Sleep(1200);return;}System.IO.File.WriteAllText(System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory,"auto-launched.txt"),"launched"); } }')
+    $taskAutoSourceDir = Join-Path $taskQaRoot 'auto-source'
+    New-Item -ItemType Directory -Path $taskAutoSourceDir | Out-Null
+    $taskAutoExe = Join-Path $taskAutoSourceDir 'snowdown.exe'
+    & (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe') /nologo /target:exe /platform:x64 "/out:$taskAutoExe" $taskAutoSource
+    if ($LASTEXITCODE -ne 0) { throw 'Auto fixture compilation failed.' }
+    $taskMainMatch = [regex]::Match($taskScript,'(?m)^!define MAINBINARYSRCPATH "([^\r\n]+)"')
+    if (-not $taskMainMatch.Success) { throw 'Missing main executable definition.' }
+    $taskAutoPayload = Join-Path $taskQaRoot 'auto-payload.exe'
+    $taskAutoScript = $taskScript.Replace($taskMainMatch.Groups[1].Value,$taskAutoExe).Replace($taskPayload,$taskAutoPayload)
+    $taskAutoNsi = Join-Path $taskQaRoot 'auto.nsi'
+    $taskAutoScript | Set-Content -LiteralPath $taskAutoNsi -Encoding utf8
+    & $taskCompiler /V2 "/X!addincludedir `"$taskGenerated`"" $taskAutoNsi
+    if ($LASTEXITCODE -ne 0) { throw 'Auto payload compilation failed.' }
+    $taskAutoWrapper = Join-Path $taskQaRoot 'auto-wrapper.exe'
+    & (Join-Path $taskRoot 'scripts\build-installer.ps1') -SkipTests -PayloadPath $taskAutoPayload -OutputPath $taskAutoWrapper -ProgramPath $taskAutoExe
+    $taskPrevious = Join-Path $taskInstall '.snowdown-program-files.v1'
+    $taskOld = Join-Path $taskInstall 'resources\obsolete.dll'
+    [IO.File]::WriteAllText($taskOld,'owned obsolete binary')
+    $taskOldHash = (Get-FileHash -LiteralPath $taskOld).Hash.ToLowerInvariant()
+    [IO.File]::AppendAllText($taskPrevious,$taskOldHash+'|resources/obsolete.dll'+[char]10)
+    foreach ($taskProtected in @('Cookies','settings.json','tasks.db','download.mp4')) { [IO.File]::WriteAllText((Join-Path $taskInstall $taskProtected),'preserve-'+$taskProtected) }
+    $taskWaiting = Start-Process -FilePath $taskAutoExe -ArgumentList '--hold' -PassThru -WindowStyle Hidden
+    $taskAutoResult = Start-Process -FilePath $taskAutoWrapper -ArgumentList @('--auto-update',"`"--update-dir=$taskInstall`"","--wait-pid=$($taskWaiting.Id)") -PassThru -Wait -WindowStyle Hidden
+    if ($taskAutoResult.ExitCode -ne 0) { throw "Auto overwrite failed: $($taskAutoResult.ExitCode)" }
+    for ($taskWait=0; $taskWait -lt 30 -and -not (Test-Path -LiteralPath (Join-Path $taskInstall 'auto-launched.txt')); $taskWait++) { Start-Sleep -Milliseconds 100 }
+    if (-not (Test-Path -LiteralPath (Join-Path $taskInstall 'auto-launched.txt'))) { throw 'Updated program was not restarted.' }
+    if ((Get-FileHash -LiteralPath $taskApp).Hash -ne (Get-FileHash -LiteralPath $taskAutoExe).Hash) { throw 'Auto update did not replace the program.' }
+    if (Test-Path -LiteralPath $taskOld) { throw 'Obsolete owned program file was not removed.' }
+    foreach ($taskProtected in @('Cookies','settings.json','tasks.db','download.mp4')) { if ([IO.File]::ReadAllText((Join-Path $taskInstall $taskProtected)) -ne 'preserve-'+$taskProtected) { throw 'Auto update changed protected data.' } }
+    Write-Output 'Auto-update passed: wait for old process, silent overwrite, restart, manifest cleanup, preserved cookies/settings/tasks/downloads.'
     $taskResult = Start-Process -FilePath $taskUninstall -ArgumentList "/S _?=$taskInstall" -PassThru -Wait -WindowStyle Hidden
     if ($taskResult.ExitCode -ne 0) { throw 'QA uninstall failed.' }
     if (Test-Path -LiteralPath (Join-Path $taskInstall 'snowdown.exe')) { throw 'Uninstaller left the application binary.' }

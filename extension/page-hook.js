@@ -1,0 +1,6 @@
+// Retain only recent responses from the platform's video metadata routes, in page memory.
+(()=>{if(window.__snowdownCaptureInstalled)return;window.__snowdownCaptureInstalled=true;
+const keep=(url,text)=>{try{const u=new URL(url,location.href);if(u.origin!==location.origin||!/\/aweme\/v\d+\/web\/aweme\/detail\/|\/api\/sns\/web\/v\d+\/(?:feed|note)/.test(u.pathname)||text.length>3*1024*1024)return;const data=JSON.parse(text);(window.__snowdownMediaDetails??=[]).push(data);if(window.__snowdownMediaDetails.length>10)window.__snowdownMediaDetails.shift()}catch{}};
+const original=window.fetch;window.fetch=async function(...args){const response=await original.apply(this,args);const url=typeof args[0]==='string'?args[0]:args[0]?.url;if(url&&/aweme\/detail|sns\/web/.test(url)){const clone=response.clone();if(Number(clone.headers.get('content-length')||0)<=3*1024*1024)clone.text().then(text=>keep(url,text)).catch(()=>{})}return response};
+const open=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(method,url,...rest){this.addEventListener('load',()=>{try{if(this.responseType===''||this.responseType==='text')keep(String(url),this.responseText)}catch{}},{once:true});return open.call(this,method,url,...rest)};
+})();

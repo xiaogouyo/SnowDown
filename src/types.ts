@@ -31,6 +31,7 @@ export interface VideoInfo {
 }
 
 export interface DownloadTask {
+  resource?: { url:string; extension:string } | null
   platform: Platform
   sourceUrl: string
   id: string
@@ -71,7 +72,7 @@ export interface AppSnapshot {
   mediaReady: boolean
   authenticated: boolean
   auth: { state: 'loggedout' | 'checking' | 'authenticated' | 'expired' | 'offline'; account: { uid: number; name: string; avatar: string } | null; message: string | null }
-  siteSessions: { platform: Platform; saved: boolean }[]
+  siteSessions: { platform: Platform; saved: boolean; account?: { name: string; avatar: string } | null }[]
   version: string
 }
 

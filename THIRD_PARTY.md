@@ -2,6 +2,8 @@
 
 SnowDown uses Vue (MIT), Tauri (MIT / Apache-2.0), Rust libraries under their individual licenses, SQLite (public domain), and Lucide icons (ISC). Dependency versions are pinned by package-lock.json and src-tauri/Cargo.lock.
 
+The browser extension uses [Mediabunny](https://github.com/Vanilagy/mediabunny) (MPL-2.0) to merge separate MP4 video/audio in the browser. Its unmodified source version is pinned in package-lock.json and its full license is bundled in the extension. Snowflake artwork derives from the existing Lucide icon system (ISC); the extension contains only a public key for a stable development ID.
+
 The QR code renderer uses the qrcode Rust crate (MIT / Apache-2.0). The customized NSIS installer template is derived from [Tauri's installer template](https://github.com/tauri-apps/tauri/blob/dev/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi), under MIT / Apache-2.0, copyright Tauri Programme within The Commons Conservancy. The source template is included in `src-tauri/installer/snowdown.nsi`.
 
 The Windows background parser uses webview2-com (MIT) and windows-rs (MIT / Apache-2.0) to observe video-detail responses in the app's own hidden WebView2 window, sharing only the app's platform login profile. Source and dependency versions are recorded in Cargo.lock.

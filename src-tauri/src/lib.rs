@@ -3,6 +3,7 @@ mod batch;
 #[cfg(debug_assertions)]
 mod batch_probe;
 mod bilibili;
+mod browser_bridge;
 mod clipboard;
 #[cfg(debug_assertions)]
 mod clipboard_probe;
@@ -14,12 +15,15 @@ mod engine;
 mod minimal_probe;
 mod model;
 mod qr_login;
+mod resource_download;
 mod site_sessions;
 mod sites;
 mod storage;
 mod transfer;
 mod tray_menu;
+mod update_cleanup;
 mod update_mirrors;
+mod update_notice;
 mod updater;
 mod web_capture;
 
@@ -50,6 +54,8 @@ pub struct AppState {
     updater: Arc<updater::Updater>,
     clipboard: clipboard_watch::Monitor,
     stopping: AtomicBool,
+    update_notice: update_notice::Notice,
+    browser: browser_bridge::Bridge,
 }
 
 impl AppState {
@@ -146,8 +152,30 @@ fn update_status(state: State<'_, Arc<AppState>>) -> updater::UpdateStatus {
 }
 
 #[tauri::command]
-async fn check_update(state: State<'_, Arc<AppState>>) -> Result<updater::UpdateStatus, String> {
-    state.updater.check().await
+async fn check_update(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<updater::UpdateStatus, String> {
+    let status = state.updater.check().await?;
+    update_notice::sync(&app, &status);
+    Ok(status)
+}
+
+#[tauri::command]
+fn dismiss_update_notice(app: AppHandle) {
+    update_notice::dismiss(&app);
+}
+#[tauri::command]
+fn browser_status(state: State<'_, Arc<AppState>>) -> Vec<browser_bridge::BrowserStatus> {
+    browser_bridge::snapshot(&state)
+}
+#[tauri::command]
+fn install_browser_extension(app: AppHandle, browser: String) -> Result<String, String> {
+    browser_bridge::install(&app, &browser)
+}
+
+pub fn native_browser_host() -> bool {
+    browser_bridge::native_host()
 }
 
 #[tauri::command]
@@ -170,6 +198,7 @@ fn download_update(
         settings.download_connections,
         settings.max_speed_mbps as u64 * 1024 * 1024,
         move |status| {
+            update_notice::sync(&app, &status);
             let _ = app.emit("snowdown://update", status);
         },
     )
@@ -190,45 +219,71 @@ async fn install_update(app: AppHandle, state: State<'_, Arc<AppState>>) -> Resu
         .operation
         .try_lock()
         .map_err(|_| "更新操作正在进行。")?;
-    let installer = match state.updater.verified_installer().await {
+    let _installer = match state.updater.verified_installer().await {
         Ok(path) => path,
         Err(error) => {
             let _ = app.emit("snowdown://update", state.updater.status());
             return Err(error);
         }
     };
+    let current = std::env::current_exe().map_err(|_| "无法确定当前软件目录。")?;
+    let directory = current.parent().ok_or("无法确定当前软件目录。")?;
+    let path_text = directory.to_string_lossy();
+    if directory.parent().is_none()
+        || path_text.starts_with("\\\\")
+        || path_text.encode_utf16().count() > 180
     {
-        let tasks = state.tasks.lock().unwrap();
-        if tasks.iter().any(|task| {
-            matches!(
-                task.status,
-                TaskStatus::Queued | TaskStatus::Downloading | TaskStatus::Merging
-            )
-        }) || !state.active.lock().unwrap().is_empty()
+        return Err("当前目录不适合自动覆盖安装，请下载更新并选择独立的软件文件夹。".into());
+    }
+    state.updater.mark_installing();
+    let result = async {
         {
-            return Err("请先暂停或完成下载任务，再退出安装更新。".into());
+            let mut tasks = state.tasks.lock().unwrap();
+            for cancel in state.active.lock().unwrap().values() {
+                cancel.store(true, Ordering::Relaxed);
+            }
+            let mut updates = Vec::new();
+            for task in tasks.iter_mut().filter(|task| {
+                matches!(
+                    task.status,
+                    TaskStatus::Queued | TaskStatus::Downloading | TaskStatus::Merging
+                )
+            }) {
+                task.status = TaskStatus::Paused;
+                task.speed = 0;
+                task.active_connections = 0;
+                task.error = None;
+                updates.push(task.clone());
+            }
+            state.storage.save_tasks(&updates)?;
         }
-        let current = std::env::current_exe().map_err(|_| "无法确定当前软件目录。")?;
-        let directory = current.parent().ok_or("无法确定当前软件目录。")?;
-        let path_text = directory.to_string_lossy();
-        if directory.parent().is_none()
-            || path_text.starts_with("\\\\")
-            || path_text.encode_utf16().count() > 180
-        {
-            return Err(
-                "当前目录不适合直接覆盖安装，请从 GitHub 下载更新并选择独立的软件文件夹。".into(),
-            );
+        state.emit(&app);
+        let _ = app.emit("snowdown://update", state.updater.status());
+        for _ in 0..600 {
+            if state.active.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        state.updater.mark_installing();
-        let result = std::process::Command::new(installer)
+        if !state.active.lock().unwrap().is_empty() {
+            return Err("下载任务仍在保存进度，请稍后再次安装。".to_string());
+        }
+        let installer = state.updater.verified_installer().await?;
+        std::process::Command::new(installer)
+            .arg("--auto-update")
             .arg(format!("--update-dir={}", directory.to_string_lossy()))
             .arg(format!("--wait-pid={}", std::process::id()))
-            .spawn();
-        if result.is_err() {
-            state.updater.install_failed();
-            return Err("无法启动更新安装器，请重新下载或在 GitHub 下载。".into());
-        }
+            .spawn()
+            .map_err(|_| "无法启动自动更新安装器，请重试。".to_string())?;
+        Ok::<(), String>(())
     }
+    .await;
+    if let Err(error) = result {
+        state.updater.install_failed();
+        let _ = app.emit("snowdown://update", state.updater.status());
+        return Err(error);
+    }
+    update_notice::dismiss(&app);
     app.exit(0);
     Ok(())
 }
@@ -549,6 +604,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             let data_dir = if std::env::var_os("SNOWDOWN_QR_VERIFY").is_some() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/qr-qa-app-data")
+            } else if std::env::var_os("SNOWDOWN_BROWSER_VERIFY").is_some() {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/bridge-qa-data/app")
             } else if std::env::var_os("SNOWDOWN_BATCH_VERIFY").is_some() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/batch-qa-app-data")
             } else if std::env::var_os("SNOWDOWN_UPDATE_LAYOUT").is_some() {
@@ -571,7 +628,9 @@ pub fn run() {
                 .unwrap_or_else(|_| data_dir.clone())
                 .join("SnowDown");
             #[cfg(debug_assertions)]
-            let default_download = if std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some() {
+            let default_download = if std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some()
+                || std::env::var_os("SNOWDOWN_BROWSER_VERIFY").is_some()
+            {
                 data_dir.join("media")
             } else {
                 default_download
@@ -612,11 +671,49 @@ pub fn run() {
                 )),
                 clipboard: clipboard_watch::Monitor::default(),
                 stopping: AtomicBool::new(false),
+                update_notice: update_notice::Notice::default(),
+                browser: browser_bridge::Bridge::default(),
             });
             app.manage(state.clone());
             tray_menu::create(&handle)?;
+            update_notice::create(&handle)?;
             #[cfg(debug_assertions)]
-            if std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some() {
+            let browser_test = std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some();
+            #[cfg(not(debug_assertions))]
+            let browser_test = false;
+            if !browser_test {
+                let _ = browser_bridge::register();
+                browser_bridge::start(handle.clone(), state.clone());
+            }
+            let cleanup_dir = data_dir.join("updates");
+            tauri::async_runtime::spawn(async move {
+                // The installer can still hold its own executable briefly after launch.
+                for _ in 0..30 {
+                    update_cleanup::installed(&cleanup_dir, updater_version).await;
+                    browser_bridge::cleanup_hosts();
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            });
+            #[cfg(debug_assertions)]
+            if std::env::var_os("SNOWDOWN_BROWSER_VERIFY").is_some() {
+                let app = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+                    let _ = minimal_probe::capture_label(&app, "main", "desktop-tile").await;
+                    let _ = batch_probe::evaluate(
+                        &app,
+                        "document.querySelector('.extension-tile')?.click();true",
+                    )
+                    .await;
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    let _ = minimal_probe::capture_label(&app, "main", "extension-setup").await;
+                    let _ = batch_probe::evaluate(
+                        &app,
+                        "document.querySelector('[aria-label=\"关闭插件设置\"]')?.click();true",
+                    )
+                    .await;
+                });
+            } else if std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some() {
                 minimal_probe::start(handle.clone());
             } else if std::env::var_os("SNOWDOWN_CLIPBOARD_VERIFY").is_some() {
                 clipboard_probe::start(handle.clone());
@@ -659,7 +756,7 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if matches!(window.label(), "main" | "tray-menu") {
+                if matches!(window.label(), "main" | "tray-menu" | "update-notice") {
                     api.prevent_close();
                     let _ = window.hide();
                 }
@@ -673,6 +770,9 @@ pub fn run() {
             download_update,
             cancel_update_download,
             install_update,
+            dismiss_update_notice,
+            browser_status,
+            install_browser_extension,
             open_update_release,
             inspect_video,
             create_tasks,

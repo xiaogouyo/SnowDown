@@ -11,6 +11,7 @@ import UiSelect from './components/UiSelect.vue'
 import BatchDownload from './components/BatchDownload.vue'
 import UpdateCenter from './components/UpdateCenter.vue'
 import MinimalMode from './components/MinimalMode.vue'
+import BrowserExtension from './components/BrowserExtension.vue'
 import { identifySource, platformLabels, sourceSummary } from './sources'
 import { bytes, duration, errorMessage, statusLabels } from './format'
 import type { AppSnapshot, BatchOptions, BatchResult, ClipboardCapture, ClipboardSnapshot, DownloadTask, OutputFormat, Settings, VideoInfo, LoginQr, Platform, SourceLink } from './types'
@@ -45,6 +46,7 @@ const batchOpen = ref(false)
 const batchButton = ref<HTMLButtonElement>()
 const updateCenter = ref<InstanceType<typeof UpdateCenter>>()
 const updateOpen = ref(false)
+const extensionOpen = ref(false)
 const settingsTab = ref<'download' | 'account'>('download')
 const settingsDraft = reactive<Settings>({ downloadDir: '', concurrency: 2, downloadConnections: 8, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false })
 const accountPlatform = ref<Platform>('bilibili')
@@ -62,6 +64,7 @@ const platformList: Platform[] = ['bilibili', 'douyin', 'xiaohongshu']
 const filterOptions = [{ value: 'all', label: '全部状态' }, { value: 'downloading', label: '进行中' }, { value: 'paused', label: '已暂停' }, { value: 'failed', label: '失败' }]
 const connectionOptions = [1, 2, 4, 8, 16].map(value => ({ value, label: `${value} 个连接${value === 8 ? "（推荐）" : ""}` }))
 const concurrencyOptions = [1, 2, 3, 4].map(value => ({ value, label: `${value} 个任务` }))
+const siteAccount = computed(() => snapshot.value?.siteSessions.find(site => site.platform === accountPlatform.value)?.account)
 const siteSessionSaved = computed(() => snapshot.value?.siteSessions.some(site => site.platform === accountPlatform.value && site.saved))
 const loginQr = ref<LoginQr | null>(null)
 const loginState = ref<'idle' | 'loading' | 'waiting' | 'scanned' | 'expired' | 'error'>('idle')
@@ -452,6 +455,7 @@ onUnmounted(() => { disposed = true; parseGeneration++; unsubscribe?.(); unwatch
         <svg class="sidebar-mountains" viewBox="0 0 180 90" aria-hidden="true"><path d="m0 90 53-67 46 49 29-34 52 52" fill="#dbe9f7"/><path d="m26 90 65-81 70 81" fill="#c5daf1"/><path d="m68 38 23-29 25 29-15-5-10 9-10-9z" fill="#fff"/><path d="m0 90 53-67 15 18-13-4-10 10-10-2z" fill="#edf5fc"/></svg>
       </div>
 
+      <BrowserExtension @visibility="value => extensionOpen = value" />
       <div class="sidebar-bottom">
         <button class="nav-item" @click="openFolder"><FolderOpen :size="18" /><span>打开下载目录</span><ArrowUpRight class="subtle" :size="14" /></button>
         <button class="nav-item" @click="openSettings()"><Settings2 :size="18" /><span>设置</span></button>
@@ -467,7 +471,7 @@ onUnmounted(() => { disposed = true; parseGeneration++; unsubscribe?.(); unwatch
     <div class="main-shell">
       <header class="topbar" data-tauri-drag-region>
         <div class="breadcrumb" data-tauri-drag-region>工作空间 <span>/</span> <strong>{{ viewTitle }}</strong></div>
-        <div class="topbar-right"><span class="platform-badge"><span class="tiny-dot"></span> Windows 桌面版</span><UpdateCenter v-if="snapshot" ref="updateCenter" :current-version="snapshot.version" :can-prompt="!simpleMode && !video && !dialog && !batchOpen && !analyzing && !submitting" :active-downloads="tasks.filter(task => ['queued', 'downloading', 'merging'].includes(task.status)).length" @visibility="value => updateOpen = value" /><button class="icon-button" aria-label="关于 SnowDown" @click="dialog = 'about'"><Info :size="18" /></button><div class="window-controls"><button aria-label="最小化窗口" title="最小化" @click="controlWindow('minimize')"><Minus :size="15" /></button><button :aria-label="maximized ? '还原窗口' : '最大化窗口'" :title="maximized ? '还原' : '最大化'" @click="controlWindow('maximize')"><Copy v-if="maximized" :size="13" /><Square v-else :size="13" /></button><button class="window-close" aria-label="关闭到托盘" title="关闭到托盘，继续下载；完全退出请使用托盘菜单" @click="controlWindow('close')"><X :size="17" /></button></div></div>
+        <div class="topbar-right"><span class="platform-badge"><span class="tiny-dot"></span> Windows 桌面版</span><UpdateCenter v-if="snapshot" ref="updateCenter" :current-version="snapshot.version" :can-prompt="!extensionOpen && !simpleMode && !video && !dialog && !batchOpen && !analyzing && !submitting" :active-downloads="tasks.filter(task => ['queued', 'downloading', 'merging'].includes(task.status)).length" @visibility="value => updateOpen = value" /><button class="icon-button" aria-label="关于 SnowDown" @click="dialog = 'about'"><Info :size="18" /></button><div class="window-controls"><button aria-label="最小化窗口" title="最小化" @click="controlWindow('minimize')"><Minus :size="15" /></button><button :aria-label="maximized ? '还原窗口' : '最大化窗口'" :title="maximized ? '还原' : '最大化'" @click="controlWindow('maximize')"><Copy v-if="maximized" :size="13" /><Square v-else :size="13" /></button><button class="window-close" aria-label="关闭到托盘" title="关闭到托盘，继续下载；完全退出请使用托盘菜单" @click="controlWindow('close')"><X :size="17" /></button></div></div>
       </header>
 
       <main class="workspace">
@@ -518,10 +522,10 @@ onUnmounted(() => { disposed = true; parseGeneration++; unsubscribe?.(); unwatch
             <div v-else class="task-list">
               <article v-for="task in currentTasks" :key="task.id" class="task-row">
                 <input type="checkbox" :aria-label="`选择 ${task.title}`" :checked="selectedTasks.includes(task.id)" @change="toggleTask(task.id)" />
-                <div class="task-cover"><img v-if="task.cover" :src="task.cover" alt="" loading="lazy" referrerpolicy="no-referrer" /><Film v-else :size="24" /><span>{{ task.format === 'audio' ? '音频' : task.platform === 'bilibili' ? `P${task.page}` : '视频' }}</span></div>
+                <div class="task-cover"><img v-if="task.cover" :src="task.cover" alt="" loading="lazy" referrerpolicy="no-referrer" /><Film v-else :size="24" /><span>{{ task.resource ? '资源' : task.format === 'audio' ? '音频' : task.platform === 'bilibili' ? `P${task.page}` : '视频' }}</span></div>
                 <div class="task-info">
                   <div class="task-title-line"><h3 :title="task.title">{{ task.title }}</h3><span :class="['status-tag', task.status]">{{ statusLabels[task.status] }}</span></div>
-                  <div class="task-meta"><span :class="['task-platform', task.platform]">{{ platformLabels[task.platform ?? 'bilibili'] }}</span><i></i><span v-if="task.format === 'audio'"><Music2 :size="11" />M4A</span><span v-else>MP4 · {{ task.qualityLabel }}</span><i></i><span class="page-title" :title="task.pageTitle">{{ task.platform === 'bilibili' || !task.platform ? `P${task.page} · ` : '' }}{{ task.pageTitle }}</span></div>
+                  <div class="task-meta"><span :class="['task-platform', task.platform]">{{ task.resource ? '浏览器' : platformLabels[task.platform ?? 'bilibili'] }}</span><i></i><span v-if="task.resource">{{ task.resource.extension.toUpperCase() }}</span><span v-else-if="task.format === 'audio'"><Music2 :size="11" />M4A</span><span v-else>MP4 · {{ task.qualityLabel }}</span><i></i><span class="page-title" :title="task.pageTitle">{{ !task.resource && (task.platform === 'bilibili' || !task.platform) ? `P${task.page} · ` : '' }}{{ task.pageTitle }}</span></div>
                   <div v-if="['downloading', 'merging', 'paused', 'queued'].includes(task.status)" class="progress-track"><div :class="{ paused: task.status === 'paused' }" :style="{ width: `${Math.min(task.progress, 100)}%` }"></div></div>
                   <div class="task-detail"><span v-if="task.error" class="task-error" :title="task.error">{{ task.error }}</span><span v-else-if="task.warning" class="task-warning" :title="task.warning">{{ task.warning }}</span><span v-else-if="task.status === 'completed'">{{ bytes(task.totalBytes) }}<span class="detail-separator">·</span>已保存到下载目录</span><span v-else-if="task.status === 'queued' && task.startIntervalSecs">等待下载<span class="detail-separator">·</span>同批启动间隔 {{ task.startIntervalSecs }} 秒</span><span v-else>{{ bytes(task.downloadedBytes) }}<template v-if="task.totalBytes"> / {{ bytes(task.totalBytes) }}</template></span><span v-if="task.status === 'downloading'" class="task-speed">{{ bytes(task.speed) }}/s<template v-if="task.activeConnections"> · {{ task.activeConnections }} 连接</template><span class="detail-separator">·</span>{{ task.progress.toFixed(1) }}%</span><span v-else-if="task.status === 'merging'">正在生成完整文件…</span></div>
                   <small v-if="task.resumedBytes" class="transfer-resumed">已续传 {{ bytes(task.resumedBytes) }}</small>
@@ -542,7 +546,7 @@ onUnmounted(() => { disposed = true; parseGeneration++; unsubscribe?.(); unwatch
         <div class="workspace-note"><span class="note-icon"><ShieldCheck :size="16" /></span><div><strong>安心收藏，文件始终在你手中</strong><p>视频直接保存到本地。关闭窗口后，SnowDown 会在系统托盘继续下载。</p></div><span class="note-decoration"><Snowflake :size="33" :stroke-width="1" /></span></div>
       </main>
 
-      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="updateCenter?.open()">v{{ snapshot?.version ?? '0.1.10' }}</button></div></footer>
+      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="updateCenter?.open()">v{{ snapshot?.version ?? '0.2.0' }}</button></div></footer>
     </div>
 
     </div></Transition>
@@ -593,8 +597,8 @@ onUnmounted(() => { disposed = true; parseGeneration++; unsubscribe?.(); unwatch
             <div class="account-buttons"><button class="button secondary" :disabled="savingSettings" @click="logout">退出账号</button><button class="button secondary" :disabled="savingSettings" @click="checkLogin">检查登录</button></div>
           </template>
           <template v-else-if="accountPlatform !== 'bilibili' && siteSessionSaved && !loginQr && loginState === 'idle'">
-            <div class="account-illustration"><ShieldCheck :size="25" /></div>
-            <h3>{{ platformLabels[accountPlatform] }}账号</h3>
+            <div class="account-illustration account-avatar"><img v-if="siteAccount?.avatar" :src="siteAccount.avatar" :alt="platformLabels[accountPlatform] + '头像'" referrerpolicy="no-referrer" /><ShieldCheck v-else :size="25" /></div>
+            <h3>{{ siteAccount?.name || platformLabels[accountPlatform] + '账号' }}</h3>
             <span class="login-saved"><ShieldCheck :size="14" />登录状态已加密保存</span>
             <p>已保存此平台登录状态。输入视频链接并点击“解析视频”即可选择下载。</p>
             <div class="account-buttons"><button class="button secondary" :disabled="savingSettings" @click="logout">退出账号</button><button class="button secondary" :disabled="savingSettings" @click="checkLogin">检查登录</button></div>
@@ -618,6 +622,6 @@ onUnmounted(() => { disposed = true; parseGeneration++; unsubscribe?.(); unwatch
       </section>
     </div>
 
-    <div v-if="dialog === 'about' && !simpleMode" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.10' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="openUpdateCenter">检查更新<RotateCcw :size="14" /></button></section></div>
+    <div v-if="dialog === 'about' && !simpleMode" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.2.0' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="openUpdateCenter">检查更新<RotateCcw :size="14" /></button></section></div>
   </div>
 </template>

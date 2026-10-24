@@ -42,6 +42,15 @@ namespace SnowDown.Setup
             InstallerCore.Cleanup(temporary);
             Check(Directory.Exists(temporary), "cleanup refuses a directory it did not create");
             Directory.Delete(temporary);
+            Check(InstallerCore.BackendArguments(@"D:\SnowDown",true)==@"/S /UPDATE /NS /D=D:\SnowDown","automatic update preserves data and avoids shortcuts");
+            Check(InstallerCore.AutomaticUpdate(new[]{"--auto-update",@"--update-dir=D:\SnowDown","--wait-pid=123"}),"automatic update requires complete arguments");
+            string cleanup=Path.Combine(Path.GetTempPath(),"SnowDown-Prune-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(Path.Combine(cleanup,"resources"));
+            string digest;using(MemoryStream data=new MemoryStream(Encoding.UTF8.GetBytes("old")))digest=InstallerCore.Hash(data);
+            foreach(string file in new[]{"resources/old.dll","resources/modified.dll","Cookies","settings.json","video.mp4"})File.WriteAllText(Path.Combine(cleanup,file),file.Contains("modified")?"user-changed":"old",new UTF8Encoding(false));
+            string old="SnowDown-owned-files-v1\n";foreach(string file in new[]{"resources/old.dll","resources/modified.dll","Cookies","settings.json","video.mp4","../escape.dll"})old+=digest+"|"+file+"\n";
+            Check(InstallerCore.PruneObsolete(cleanup,old,"SnowDown-owned-files-v1\n"+digest+"|snowdown.exe\n")==1,"remove only unchanged obsolete program files");
+            foreach(string file in new[]{"resources/modified.dll","Cookies","settings.json","video.mp4"})Check(File.Exists(Path.Combine(cleanup,file)),"preserve user data or modified file: "+file);
+            Directory.Delete(cleanup,true);
             Console.WriteLine("Installer core: " + assertions + " assertions passed.");
             return 0;
         }

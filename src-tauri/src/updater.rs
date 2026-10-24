@@ -314,6 +314,13 @@ impl Updater {
             serde_json::from_slice(&bytes).map_err(|_| "GitHub 返回的版本信息无法识别。")?;
         let current = self.status.lock().unwrap().current_version.clone();
         let release = parse_release(&value, &current)?;
+        let cached = if let Some(release) = &release {
+            verify_file(&self.directory.join(&release.file_name), release)
+                .await
+                .is_ok()
+        } else {
+            false
+        };
         let saved = if let Some(release) = &release {
             transfer::saved_bytes(&self.partial_path(release), &Self::identity(release)).await
         } else {
@@ -336,6 +343,10 @@ impl Updater {
             if !matches!(status.phase, Phase::Ready | Phase::Installing) && saved > 0 {
                 status.phase = Phase::Paused;
                 status.downloaded = saved;
+            }
+            if cached {
+                status.phase = Phase::Ready;
+                status.downloaded = release.as_ref().unwrap().size;
             }
             status.release = release;
             status.error = None;
@@ -652,7 +663,7 @@ impl Updater {
     /// Re-read the full file immediately before installation. The UI never supplies a path.
     pub async fn verified_installer(&self) -> Result<PathBuf, String> {
         let status = self.status();
-        if status.phase != Phase::Ready {
+        if !matches!(status.phase, Phase::Ready | Phase::Installing) {
             return Err("请先下载并校验更新包。".into());
         }
         let release = status.release.ok_or("更新信息已失效，请重新检查。")?;

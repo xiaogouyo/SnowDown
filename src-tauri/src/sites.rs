@@ -386,6 +386,9 @@ pub fn from_browser(source: &Source, value: &Value, quality: u32) -> Result<Reso
 type Metadata = (String, String, String, u64, Vec<Stream>);
 pub fn from_detail(source: &Source, value: &Value, quality: u32) -> Result<Resolved, String> {
     let id = video_id(source)?;
+    if source.platform == Platform::Xiaohongshu {
+        return build_resolved(source, &id, parse_xhs(value, &id)?, quality);
+    }
     let mut resolved = build_resolved(source, &id, parse_douyin(value, &id)?, quality)?;
     resolved.audio_url = douyin_audio(&value["aweme_detail"]["video"]);
     Ok(resolved)

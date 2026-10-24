@@ -123,7 +123,7 @@ describe('GitHub update center', () => {
     click('.update-check'); await flushPromises()
     expect(api.checkUpdate).toHaveBeenCalledTimes(2)
   })
-  it('downloads with progress, continues in the background, and allows install only after tasks stop', async () => {
+  it('downloads in the background and installs with native checkpointing for active tasks', async () => {
     await wrapper.get('button').trigger('click'); await flushPromises()
     let finish!: (value: UpdateStatus) => void
     api.downloadUpdate.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
@@ -137,9 +137,9 @@ describe('GitHub update center', () => {
     api.checkUpdate.mockResolvedValue({ ...available, phase: 'ready', downloaded: 1024 })
     await wrapper.setProps({ activeDownloads: 1 })
     await wrapper.get('button').trigger('click'); await flushPromises()
-    expect(dialog().querySelector('.update-install')?.hasAttribute('disabled')).toBe(true)
+    expect(dialog().querySelector('.update-install')?.hasAttribute('disabled')).toBe(false)
+    expect(dialog().textContent).toContain('保存进度并暂停')
     expect(api.installUpdate).not.toHaveBeenCalled()
-    await wrapper.setProps({ activeDownloads: 0 }); await flushPromises()
     click('.update-install'); await flushPromises()
     expect(api.installUpdate).toHaveBeenCalledTimes(1)
   })

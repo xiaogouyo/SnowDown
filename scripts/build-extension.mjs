@@ -1,0 +1,12 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {build} from 'esbuild';
+const root=path.resolve(import.meta.dirname,'..'),src=path.join(root,'extension'),out=path.join(root,'src-tauri/resources/browser-extension');
+await fs.mkdir(path.join(out,'icons'),{recursive:true});
+const identity=JSON.parse(await fs.readFile(path.join(src,'identity.json'),'utf8'));
+const manifest={manifest_version:3,name:'SnowDown',version:'0.1.0',description:'B站、抖音、小红书视频下载与网页资源收藏；可选联动 SnowDown 桌面端。',key:identity.key,minimum_chrome_version:'116',action:{default_popup:'popup.html',default_icon:{32:'icons/32.png',128:'icons/128.png'}},icons:{32:'icons/32.png',128:'icons/128.png'},background:{service_worker:'background.js',type:'module'},permissions:['activeTab','scripting','storage','downloads','cookies','nativeMessaging','alarms','webRequest','declarativeNetRequestWithHostAccess'],host_permissions:['https://*.bilibili.com/*','https://*.douyin.com/*','https://*.xiaohongshu.com/*','https://*.bilivideo.com/*','https://*.bilivideo.cn/*','https://*.douyinvod.com/*','https://*.xhscdn.com/*'],optional_host_permissions:['http://*/*','https://*/*'],content_scripts:[{matches:['https://*.douyin.com/*','https://*.xiaohongshu.com/*'],js:['page-hook.js'],run_at:'document_start',world:'MAIN'}],content_security_policy:{extension_pages:"script-src 'self'; object-src 'none'"}};
+await fs.writeFile(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2));
+for(const file of ['popup.html','job.html','style.css','page-hook.js','icons/32.png','icons/128.png'])await fs.copyFile(path.join(src,file),path.join(out,file));
+await build({entryPoints:['background.js','popup.js','job.js'].map(f=>path.join(src,f)),outdir:out,bundle:true,format:'esm',platform:'browser',target:'chrome116',minify:true,legalComments:'eof'});
+await fs.copyFile(path.join(root,'node_modules/mediabunny/LICENSE'),path.join(out,'MEDIABUNNY-LICENSE.txt'));
+console.log(`SnowDown extension v0.1.0 · ${identity.id} · ${out}`);

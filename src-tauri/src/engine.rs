@@ -181,6 +181,9 @@ async fn run_task(
     cancel: &Arc<AtomicBool>,
 ) -> Result<(), String> {
     check_cancel(cancel)?;
+    if task.resource.is_some() {
+        return crate::resource_download::run(app, state, task, cancel).await;
+    }
     let ffmpeg = state
         .ffmpeg
         .as_ref()

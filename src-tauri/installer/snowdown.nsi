@@ -978,6 +978,7 @@ Section Uninstall
 
 
   ; Delete uninstaller
+  Delete "$INSTDIR\.snowdown-program-files.v1"
   Delete "$INSTDIR\uninstall.exe"
 
   {{#each resources_ancestors}}

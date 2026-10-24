@@ -122,6 +122,24 @@ impl Auth {
             .map(|c| c.cookie.clone())
             .unwrap_or_default()
     }
+    pub async fn import_browser(&self, cookie: String) -> Result<(), String> {
+        if cookie.is_empty() || cookie.len() > 64 * 1024 || cookie.chars().any(char::is_control) {
+            return Err("浏览器会话无效。".into());
+        }
+        let generation = self.inner.lock().unwrap().generation;
+        let account = self
+            .account(&cookie)
+            .await?
+            .ok_or("浏览器B站账号未登录。")?;
+        self.complete(
+            generation,
+            Credentials {
+                cookie,
+                refresh_token: String::new(),
+                account: Some(account),
+            },
+        )
+    }
 
     pub fn snapshot(&self) -> AuthStatus {
         self.inner.lock().unwrap().status.clone()

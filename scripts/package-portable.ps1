@@ -11,6 +11,7 @@ Copy-Item -LiteralPath (Join-Path $taskRoot 'src-tauri\target\release\snowdown.e
 foreach ($taskFile in @('ffmpeg.exe', 'FFMPEG-LICENSE.txt', 'NOTICE.txt', 'ffmpeg-build.json')) {
     Copy-Item -LiteralPath (Join-Path $taskRoot ('src-tauri\resources\' + $taskFile)) -Destination (Join-Path $taskResources $taskFile)
 }
+Copy-Item -LiteralPath (Join-Path $taskRoot 'src-tauri\resources\browser-extension') -Destination $taskResources -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $taskRoot 'THIRD_PARTY.md') -Destination (Join-Path $taskPortable 'THIRD_PARTY.md')
 @"
 SnowDown Windows $taskVersion
@@ -35,8 +36,8 @@ SnowDown Windows $taskVersion
 可在更新弹窗展开镜像库查看节点状态、实测延迟与当前下载源，测速和下载均可暂停。
 “后台下载”仅收起更新面板，原生任务继续；右上角版本入口可查看实际进度和待安装状态。
 切换到简约模式或关闭主窗口到托盘，也会继续下载；可返回完整模式查看更新。
-更新包可在软件内暂停、继续和重试，重开软件后保留进度，核对官方GitHub的SHA256后可退出并打开安装器。
-安装前请先暂停或完成下载任务。免安装版若保持免安装方式，请在GitHub下载ZIP，退出后解压覆盖。
+更新包可在软件内暂停、继续和重试，重开软件后保留进度，核对官方GitHub的SHA256后会弹出右下角通知，点击安装更新即可自动覆盖并重启。
+安装时会先保存下载进度并暂停任务；账号登录、设置、任务和下载内容保留。免安装版若保持免安装方式，请在GitHub下载ZIP，退出后解压覆盖。
 支持完整分享文字；点击“粘贴并解析”或按 Ctrl+Shift+V 快速解析。
 原生后台持续识别剪贴板链接，关闭到托盘后仍生效，可在设置中关闭。
 开启自动解析后在后台准备最新结果，回到窗口展示，不自动创建下载任务。
@@ -62,7 +63,11 @@ B站会话失效后需重新扫码；退出账号会删除本机保存的登录�
 登录成功后加密保存；已登录时可“退出账号”或“检查登录”。
 退出会清除软件内该平台的会话和网页登录资料，不影响外部浏览器账号。
 登录只负责账号授权，粘贴目标视频链接并点击“解析视频”才开始解析。
-首批支持视频笔记，不支持图集、直播或私密内容。当前版本尚未提供浏览器扩展。
+首批支持视频笔记，不支持图集、直播或私密内容。浏览器插件 v0.1.0 可独立使用或连接桌面端。
+从左侧浏览器插件贴片选择 Chrome 或 Edge，软件准备文件和绑定，用户在浏览器管理页确认加载已解压的扩展。
+普通 Windows 浏览器不能静默安装未上架扩展，不会修改企业策略。
+点击插件 SnowDown 标志切换平台视频与网页资源筛选；可选浏览器下载或转发到软件。
+软件离线时自动回退浏览器；账号同步可在插件设置关闭，仅在本机传输并加密保存。
 "@ | Set-Content -LiteralPath (Join-Path $taskPortable '使用说明.txt') -Encoding utf8
 $taskArchive = Join-Path $taskRelease ("SnowDown_$($taskVersion)_Windows_x64_portable.zip")
 Compress-Archive -LiteralPath $taskPortable -DestinationPath $taskArchive -CompressionLevel Optimal -Force
@@ -70,7 +75,9 @@ $taskInstallerDir = Join-Path $taskRoot 'src-tauri\target\release\bundle\snowdow
 if (Test-Path -LiteralPath $taskInstallerDir) {
     Get-ChildItem -LiteralPath $taskInstallerDir -Filter "SnowDown_$($taskVersion)_*-setup.exe" | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $taskRelease $_.Name) }
 }
-Get-ChildItem -LiteralPath $taskRelease -File | Where-Object { $_.Name -like "SnowDown_$($taskVersion)_*" -and $_.Extension -in @('.zip', '.exe') } | ForEach-Object {
+$taskExtensionPackage=Join-Path $taskRelease 'SnowDown_BrowserExtension_0.1.0.zip'
+Compress-Archive -Path (Join-Path $taskRoot 'src-tauri\resources\browser-extension\*') -DestinationPath $taskExtensionPackage -CompressionLevel Optimal -Force
+Get-ChildItem -LiteralPath $taskRelease -File | Where-Object { ($_.Name -like "SnowDown_$($taskVersion)_*" -or $_.Name -eq 'SnowDown_BrowserExtension_0.1.0.zip') -and $_.Extension -in @('.zip', '.exe') } | ForEach-Object {
     $taskHash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower()
     "$taskHash  $($_.Name)"
 } | Set-Content -LiteralPath (Join-Path $taskRelease 'SHA256SUMS.txt') -Encoding ascii

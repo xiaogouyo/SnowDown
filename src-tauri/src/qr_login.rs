@@ -49,6 +49,8 @@ struct Frame {
     state: String,
     #[serde(default)]
     image: String,
+    #[serde(default)]
+    account: Option<site_sessions::Profile>,
 }
 #[derive(Clone)]
 struct Pending {
@@ -176,6 +178,10 @@ impl QrLogin {
         if !has_account_cookie(platform, &cookie) {
             return Err("平台尚未确认账号登录，请在手机上确认后重新获取二维码。".into());
         }
+        let account = frame(app, platform)
+            .await
+            .ok()
+            .and_then(|frame| frame.account);
         let mut inner = self.inner.lock().unwrap();
         if inner.generation != generation {
             return Err("登录请求已取消。".into());
@@ -183,6 +189,12 @@ impl QrLogin {
         app.state::<Arc<AppState>>()
             .site_sessions
             .save(platform, cookie)?;
+        if let Some(account) = account {
+            let _ = app
+                .state::<Arc<AppState>>()
+                .site_sessions
+                .save_profile(platform, account);
+        }
         inner.pending = None;
         inner.platform = None;
         inner.generation += 1;
