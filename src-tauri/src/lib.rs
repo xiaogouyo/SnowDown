@@ -12,6 +12,7 @@ mod qr_login;
 mod site_sessions;
 mod sites;
 mod storage;
+mod update_mirrors;
 mod updater;
 mod web_capture;
 

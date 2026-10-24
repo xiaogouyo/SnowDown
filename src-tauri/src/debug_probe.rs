@@ -151,31 +151,58 @@ fn verify_update_ui(app: AppHandle) {
         // UI-only future-release fixture; native updater retains the real trusted release data.
         let mut fixture =
             serde_json::to_value(app.state::<Arc<AppState>>().updater.status()).unwrap();
-        fixture["release"] = json!({"version":"0.1.7","title":"界面验证样例","notes":"界面验证样例：更新说明。\n".repeat(150),"publishedAt":"2026-10-24T00:00:00Z","url":"https://github.com/xiaogouyo/SnowDown/releases","fileName":"SnowDown_0.1.7_x64-setup.exe","size":1024});
+        fixture["release"] = json!({"version":"0.1.8","title":"界面验证样例","notes":"界面验证样例：更新说明。\n".repeat(150),"publishedAt":"2026-10-24T00:00:00Z","url":"https://github.com/xiaogouyo/SnowDown/releases","fileName":"SnowDown_0.1.8_x64-setup.exe","size":1024});
         fixture["total"] = 1024.into();
+        fixture["phase"] = "probing".into();
+        for (index, row) in fixture["mirrors"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .enumerate()
+        {
+            row["state"] = if index < 33 { "available" } else { "testing" }.into();
+            if index < 33 {
+                row["latencyMs"] = (100 + index).into();
+            }
+        }
+        let _ = app.emit("snowdown://update", fixture.clone());
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let probing = evaluate(&app,"document.querySelector('.update-modal')?.textContent.includes('正在选择更新镜像')&&document.querySelector('[aria-label=\"镜像检测进度\"]')?.getAttribute('aria-valuenow')==='50'").await == Some(json!(true));
+        fixture["phase"] = "downloading".into();
+        fixture["downloaded"] = 512.into();
+        fixture["downloadSource"] = crate::update_mirrors::HOSTS[0].into();
+        fixture["latencyMs"] = 100.into();
         let _ = app.emit("snowdown://update", fixture);
         tokio::time::sleep(Duration::from_millis(300)).await;
+        let _ = evaluate(
+            &app,
+            "document.querySelector('.update-mirrors').open=true;true",
+        )
+        .await;
         let mut layouts = vec![];
         if let Some(window) = app.get_webview_window("main") {
             for (width, height) in [(1180., 820.), (960., 660.)] {
                 let _ = window.set_size(tauri::LogicalSize::new(width, height));
                 tokio::time::sleep(Duration::from_millis(300)).await;
-                let layout = evaluate(&app, r#"JSON.stringify((()=>{const m=document.querySelector('.update-modal'),v=document.querySelector('.version-button'),f=m?.querySelector('.modal-footer');if(!m||!f||!v)return {valid:false};const r=m.getBoundingClientRect(),b=f.getBoundingClientRect(),s=v.getBoundingClientRect();return {valid:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&b.bottom<=r.bottom+1&&m.scrollWidth<=m.clientWidth&&s.right<=innerWidth,viewport:[innerWidth,innerHeight],futureVersion:m.textContent.includes('v0.1.7'),downloadButton:!!m.querySelector('.update-download'),laterButton:m.textContent.includes('暂不更新'),notesScroll:m.querySelector('.update-notes p').scrollHeight>m.querySelector('.update-notes p').clientHeight,footerVisible:b.height>0}})())"#).await.unwrap_or_default();
+                let layout = evaluate(&app, r#"JSON.stringify((()=>{const m=document.querySelector('.update-modal'),v=document.querySelector('.version-button'),f=m?.querySelector('.modal-footer');if(!m||!f||!v)return {valid:false};const r=m.getBoundingClientRect(),b=f.getBoundingClientRect(),s=v.getBoundingClientRect(),t=m.querySelector('.mirror-table-wrap');return {valid:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&b.bottom<=r.bottom+1&&m.scrollWidth<=m.clientWidth&&s.right<=innerWidth&&t.scrollWidth<=t.clientWidth,viewport:[innerWidth,innerHeight],futureVersion:m.textContent.includes('v0.1.8'),allMirrors:m.querySelectorAll('.update-mirrors tbody tr').length===66,selectedSource:m.querySelectorAll('tr.selected').length===1&&m.querySelector('.update-source').textContent.includes('100 ms'),cancelButton:m.textContent.includes('取消下载'),backgroundButton:m.textContent.includes('后台下载'),notesScroll:m.querySelector('.update-notes p').scrollHeight>m.querySelector('.update-notes p').clientHeight,footerVisible:b.height>0}})())"#).await.unwrap_or_default();
                 layouts.push(layout);
             }
         }
         let success = checked
+            && probing
             && layouts.iter().all(|layout| {
                 layout["valid"] == true
                     && layout["futureVersion"] == true
-                    && layout["downloadButton"] == true
-                    && layout["laterButton"] == true
+                    && layout["allMirrors"] == true
+                    && layout["selectedSource"] == true
+                    && layout["cancelButton"] == true
+                    && layout["backgroundButton"] == true
                     && layout["footerVisible"] == true
             });
-        let report = json!({"success":success,"realManualCheckSucceeded":checked,"futureReleaseIsUiFixture":true,"installerExecuted":false,"layouts":layouts});
+        let report = json!({"success":success,"realManualCheckSucceeded":checked,"probingProgressVisible":probing,"futureReleaseIsUiFixture":true,"installerExecuted":false,"layouts":layouts});
         let _ = tokio::fs::write(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../.tools/v016-update-ui-verification.json"),
+                .join("../.tools/v017-update-ui-verification.json"),
             serde_json::to_vec_pretty(&report).unwrap(),
         )
         .await;

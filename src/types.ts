@@ -99,12 +99,22 @@ export interface UpdateRelease {
   fileName: string
   size: number
 }
+export interface UpdateMirror {
+  id: number
+  host: string
+  latencyMs: number | null
+  state: 'pending' | 'testing' | 'available' | 'timeout' | 'unsupported' | 'unavailable' | 'failed' | 'cancelled'
+  message: string | null
+}
 export interface UpdateStatus {
   currentVersion: string
   release: UpdateRelease | null
-  phase: 'idle' | 'downloading' | 'ready' | 'installing' | 'error'
+  phase: 'idle' | 'probing' | 'downloading' | 'ready' | 'installing' | 'error'
   downloaded: number
   total: number
   error: string | null
   deferred: boolean
+  downloadSource: string | null
+  latencyMs: number | null
+  mirrors: UpdateMirror[]
 }

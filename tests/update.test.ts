@@ -5,7 +5,7 @@ import type { UpdateStatus } from '../src/types'
 
 const api = vi.hoisted(() => ({ desktop: true, getUpdateStatus: vi.fn(), checkUpdate: vi.fn(), subscribeUpdates: vi.fn(), deferUpdate: vi.fn(), downloadUpdate: vi.fn(), cancelUpdateDownload: vi.fn(), installUpdate: vi.fn(), openUpdateRelease: vi.fn() }))
 vi.mock('../src/api', () => ({ ...api, __v_isRef: false }))
-const empty: UpdateStatus = { currentVersion: '0.1.6', release: null, phase: 'idle', downloaded: 0, total: 0, error: null, deferred: false }
+const empty: UpdateStatus = { currentVersion: '0.1.6', release: null, phase: 'idle', downloaded: 0, total: 0, error: null, deferred: false, downloadSource: null, latencyMs: null, mirrors: [] }
 const available: UpdateStatus = { ...empty, release: { version: '0.1.7', title: 'SnowDown v0.1.7', notes: '改进下载体验\n<script>alert(1)</script>', publishedAt: '2026-10-24T12:00:00Z', url: 'https://github.com/xiaogouyo/SnowDown/releases/tag/v0.1.7', fileName: 'SnowDown_0.1.7_x64-setup.exe', size: 1024 }, total: 1024 }
 let wrapper: VueWrapper
 const dialog = () => document.body.querySelector('.update-modal')!
@@ -107,5 +107,27 @@ describe('GitHub update center', () => {
     const calls = api.checkUpdate.mock.calls.length
     await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000)
     expect(api.checkUpdate).toHaveBeenCalledTimes(calls)
+  })
+  it('shows mirror detection progress, all library rows, source selection and cancellation', async () => {
+    await wrapper.get('button').trigger('click'); await flushPromises()
+    let finish!: (value: UpdateStatus) => void
+    api.downloadUpdate.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    click('.update-download'); await flushPromises()
+    const onProgress = api.subscribeUpdates.mock.calls[0]![0]
+    const mirrors = Array.from({ length: 66 }, (_, index) => ({ id: index + 1, host: index === 65 ? 'github.nswrz.cn' : `mirror${index}.test`, latencyMs: index < 33 ? 100 + index : null, state: index < 33 ? 'available' as const : 'testing' as const, message: null }))
+    onProgress({ ...available, phase: 'probing', mirrors }); await flushPromises()
+    expect(dialog().textContent).toContain('正在选择更新镜像')
+    expect(dialog().textContent).toContain('33 / 66 个节点')
+    expect(dialog().querySelector('[aria-label="镜像检测进度"]')?.getAttribute('aria-valuenow')).toBe('50')
+    expect(dialog().querySelectorAll('.update-mirrors tbody tr')).toHaveLength(66)
+    expect(dialog().textContent).toContain('github.nswrz.cn')
+    expect(dialog().querySelector('.update-install')).toBeNull()
+    click('.update-actions button:last-child'); await flushPromises()
+    expect(api.cancelUpdateDownload).toHaveBeenCalledTimes(1)
+    onProgress({ ...available, phase: 'downloading', mirrors, downloadSource: 'mirror0.test', latencyMs: 100 }); await flushPromises()
+    expect(dialog().querySelector('.update-source')?.textContent).toContain('mirror0.test · 100 ms')
+    expect(dialog().querySelectorAll('tr.selected')).toHaveLength(1)
+    finish({ ...available, phase: 'error', mirrors, error: '已取消下载更新。' }); await flushPromises()
+    expect(dialog().querySelector('.update-download')?.textContent).toContain('重试下载')
   })
 })
