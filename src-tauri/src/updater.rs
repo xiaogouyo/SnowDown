@@ -1,4 +1,5 @@
 use crate::model::now_ms;
+use crate::transfer;
 use crate::update_mirrors::{self, MirrorResult, MirrorState};
 use reqwest::{Client, StatusCode};
 use semver::Version;
@@ -6,12 +7,15 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
 };
 use tokio::{
     fs,
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncReadExt,
     sync::{watch, Mutex as AsyncMutex, OwnedMutexGuard},
 };
 use url::Url;
@@ -19,7 +23,7 @@ use url::Url;
 const LATEST: &str = "https://api.github.com/repos/xiaogouyo/SnowDown/releases/latest";
 const RELEASES: &str = "https://github.com/xiaogouyo/SnowDown/releases";
 const MAX_INSTALLER: u64 = 512 * 1024 * 1024;
-const CANCELLED: &str = "已取消下载更新。";
+const CANCELLED: &str = "已暂停下载更新，进度已保存。";
 
 struct DownloadSource {
     mirror_id: Option<usize>,
@@ -32,6 +36,8 @@ struct DownloadJob {
     release: ReleaseInfo,
     cancel: watch::Receiver<u64>,
     _operation: OwnedMutexGuard<()>,
+    connections: usize,
+    rate: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -56,6 +62,7 @@ pub enum Phase {
     Idle,
     Probing,
     Downloading,
+    Paused,
     Ready,
     Installing,
     Error,
@@ -75,6 +82,10 @@ pub struct UpdateStatus {
     pub download_source: Option<String>,
     pub latency_ms: Option<u64>,
     pub mirrors: Vec<MirrorResult>,
+    pub active_connections: usize,
+    pub resumed_bytes: u64,
+    pub speed: u64,
+    pub range_download: bool,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
@@ -134,6 +145,8 @@ fn trusted_redirect(url: &Url) -> bool {
 
 fn client(download: bool) -> Result<Client, String> {
     Client::builder()
+        .http1_only()
+        .pool_max_idle_per_host(16)
         .user_agent(concat!("SnowDown/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(Duration::from_secs(35))
@@ -248,6 +261,10 @@ impl Updater {
                 download_source: None,
                 latency_ms: None,
                 mirrors: update_mirrors::pending(),
+                active_connections: 0,
+                resumed_bytes: 0,
+                speed: 0,
+                range_download: false,
             }),
             operation: Arc::new(AsyncMutex::new(())),
             cancel: watch::channel(0).0,
@@ -297,6 +314,11 @@ impl Updater {
             serde_json::from_slice(&bytes).map_err(|_| "GitHub 返回的版本信息无法识别。")?;
         let current = self.status.lock().unwrap().current_version.clone();
         let release = parse_release(&value, &current)?;
+        let saved = if let Some(release) = &release {
+            transfer::saved_bytes(&self.partial_path(release), &Self::identity(release)).await
+        } else {
+            0
+        };
         {
             let mut status = self.status.lock().unwrap();
             if status.release != release {
@@ -306,6 +328,14 @@ impl Updater {
                 status.download_source = None;
                 status.latency_ms = None;
                 status.mirrors = update_mirrors::pending();
+                status.active_connections = 0;
+                status.resumed_bytes = 0;
+                status.speed = 0;
+                status.range_download = false;
+            }
+            if !matches!(status.phase, Phase::Ready | Phase::Installing) && saved > 0 {
+                status.phase = Phase::Paused;
+                status.downloaded = saved;
             }
             status.release = release;
             status.error = None;
@@ -357,6 +387,10 @@ impl Updater {
         {
             let mut status = self.status.lock().unwrap();
             status.phase = phase;
+            if phase != Phase::Downloading {
+                status.active_connections = 0;
+                status.speed = 0;
+            }
             status.downloaded = downloaded;
             status.error = error;
             status.revision += 1;
@@ -364,7 +398,14 @@ impl Updater {
         self.status()
     }
 
-    fn prepare_download(&self) -> Result<DownloadJob, String> {
+    fn partial_path(&self, release: &ReleaseInfo) -> PathBuf {
+        self.directory
+            .join(format!("{}.partial", release.file_name))
+    }
+    fn identity(release: &ReleaseInfo) -> String {
+        format!("update:{}:{}", release.version, release.sha256)
+    }
+    fn prepare_download(&self, connections: usize, rate: u64) -> Result<DownloadJob, String> {
         let operation = self
             .operation
             .clone()
@@ -384,11 +425,13 @@ impl Updater {
             status.latency_ms = None;
             status.mirrors = update_mirrors::pending();
         }
-        self.progress(Phase::Probing, 0, None);
+        self.progress(Phase::Probing, self.status().downloaded, None);
         Ok(DownloadJob {
             release,
             cancel,
             _operation: operation,
+            connections: connections.clamp(1, 16),
+            rate,
         })
     }
 
@@ -396,9 +439,11 @@ impl Updater {
     /// an IPC response cannot drop the update transfer or its cancellation receiver.
     pub fn start_download(
         self: Arc<Self>,
+        connections: usize,
+        rate: u64,
         emit: impl Fn(UpdateStatus) + Send + Sync + 'static,
     ) -> Result<UpdateStatus, String> {
-        let job = self.prepare_download()?;
+        let job = self.prepare_download(connections, rate)?;
         let status = self.status();
         emit(status.clone());
         tauri::async_runtime::spawn(async move {
@@ -409,7 +454,7 @@ impl Updater {
 
     #[cfg(test)]
     pub async fn download(&self, emit: impl Fn(UpdateStatus)) -> Result<UpdateStatus, String> {
-        let job = self.prepare_download()?;
+        let job = self.prepare_download(8, 0)?;
         self.run_download(job, emit).await
     }
 
@@ -422,6 +467,8 @@ impl Updater {
             release,
             mut cancel,
             _operation,
+            connections,
+            rate,
         } = job;
         emit(self.status());
         let target = self.directory.join(&release.file_name);
@@ -470,8 +517,16 @@ impl Updater {
                 latency_ms: None,
                 url: release.download_url.clone(),
             });
-            self.try_sources(&release, sources, &http, &mut cancel, &emit)
-                .await
+            self.try_sources(
+                &release,
+                sources,
+                &http,
+                &mut cancel,
+                connections,
+                rate,
+                &emit,
+            )
+            .await
         }
         .await;
         match result {
@@ -487,8 +542,12 @@ impl Updater {
                         mirror.message = Some("本次检测已停止".into());
                     }
                 }
-                let status =
-                    self.progress(Phase::Error, self.status().downloaded, Some(error.clone()));
+                let paused = error == CANCELLED || error.contains("取消");
+                let status = self.progress(
+                    if paused { Phase::Paused } else { Phase::Error },
+                    self.status().downloaded,
+                    if paused { None } else { Some(error.clone()) },
+                );
                 emit(status);
                 Err(error)
             }
@@ -501,6 +560,8 @@ impl Updater {
         sources: Vec<DownloadSource>,
         http: &Client,
         cancel: &mut watch::Receiver<u64>,
+        connections: usize,
+        rate: u64,
         emit: &impl Fn(UpdateStatus),
     ) -> Result<(), String> {
         let mut last_error = "没有可用的下载源。".to_string();
@@ -513,9 +574,9 @@ impl Updater {
                 status.download_source = Some(source.label);
                 status.latency_ms = source.latency_ms;
             }
-            emit(self.progress(Phase::Downloading, 0, None));
+            emit(self.progress(Phase::Downloading, self.status().downloaded, None));
             match self
-                .transfer(http, &source.url, release, cancel, emit)
+                .transfer(http, &source.url, release, cancel, connections, rate, emit)
                 .await
             {
                 Ok(()) => return Ok(()),
@@ -541,43 +602,51 @@ impl Updater {
         url: &str,
         release: &ReleaseInfo,
         cancel: &mut watch::Receiver<u64>,
+        connections: usize,
+        rate: u64,
         emit: &impl Fn(UpdateStatus),
     ) -> Result<(), String> {
         let target = self.directory.join(&release.file_name);
-        let part = self
-            .directory
-            .join(format!("download-{}.part", uuid::Uuid::new_v4()));
-        let result = async {
-            let mut response = tokio::select! {
-                _ = cancel.changed() => return Err(CANCELLED.into()),
-                result = http.get(url).header("Accept-Encoding", "identity").send() => result.map_err(|_| "无法连接下载源或跳转无效。")?,
-            };
-            if response.status() != StatusCode::OK { return Err(format!("下载源返回 HTTP {}。", response.status().as_u16())) }
-            if response.content_length().is_some_and(|length| length != release.size) { return Err("更新包大小与发布信息不一致。".into()) }
-            let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&part).await.map_err(|_| "无法写入更新缓存。")?;
-            let mut hasher = Sha256::new(); let mut received = 0; let mut last_emit = Instant::now();
-            loop {
-                let chunk = tokio::select! {
-                    _ = cancel.changed() => return Err(CANCELLED.into()),
-                    result = response.chunk() => result.map_err(|_| "更新下载中断，可以重试。")?,
-                };
-                let Some(chunk) = chunk else { break };
-                received += chunk.len() as u64;
-                if received > release.size { return Err("更新包超过预期大小。".into()) }
-                hasher.update(&chunk);
-                file.write_all(&chunk).await.map_err(|_| "无法保存更新包，请检查磁盘空间。")?;
-                if last_emit.elapsed() >= Duration::from_millis(150) { emit(self.progress(Phase::Downloading, received, None)); last_emit = Instant::now(); }
-            }
-            if received != release.size || format!("{:x}", hasher.finalize()) != release.sha256 { return Err("更新包校验失败，请重新下载。".into()) }
-            file.flush().await.map_err(|_| "无法保存更新包。")?;
-            file.sync_all().await.map_err(|_| "无法保存更新包。")?;
-            drop(file);
-            if cancel.has_changed().unwrap_or(false) { return Err(CANCELLED.into()) }
-            fs::rename(&part, &target).await.map_err(|_| "无法完成更新包保存，请关闭已打开的安装器后重试。")?;
-            Ok::<(), String>(())
-        }.await;
-        let _ = fs::remove_file(&part).await;
-        result
+        let part = self.partial_path(release);
+        let stop = AtomicBool::new(false);
+        let identity = Self::identity(release);
+        let future = transfer::download(
+            http,
+            url,
+            &part,
+            transfer::Options {
+                identity: &identity,
+                expected_size: Some(release.size),
+                sha256: Some(&release.sha256),
+                connections,
+                max_bytes_per_second: rate,
+            },
+            &stop,
+            |stats| {
+                {
+                    let mut status = self.status.lock().unwrap();
+                    status.active_connections = stats.active_connections;
+                    status.resumed_bytes = stats.resumed_bytes;
+                    status.speed = stats.speed;
+                    status.range_download = stats.ranged;
+                }
+                emit(self.progress(Phase::Downloading, stats.downloaded, None));
+            },
+        );
+        tokio::pin!(future);
+        let result = tokio::select! {
+            result=&mut future=>result.map(|_|()),
+            _=cancel.changed()=>{stop.store(true,Ordering::Relaxed);let _=(&mut future).await;Err(CANCELLED.into())}
+        };
+        result?;
+        if cancel.has_changed().unwrap_or(false) {
+            return Err(CANCELLED.into());
+        }
+        fs::rename(&part, &target)
+            .await
+            .map_err(|_| "无法完成更新包保存，请关闭安装器后重试。".to_string())?;
+        transfer::cleanup(&part).await;
+        Ok(())
     }
 
     /// Re-read the full file immediately before installation. The UI never supplies a path.
@@ -642,6 +711,7 @@ pub fn releases_url() -> &'static str {
 mod tests {
     use super::*;
     use serde_json::json;
+    use tokio::io::AsyncWriteExt;
 
     fn fixture() -> serde_json::Value {
         json!({"tag_name":"v0.2.0","name":"SnowDown v0.2.0","body":"Updates","draft":false,"prerelease":false,"published_at":"2026-10-24T00:00:00Z","assets":[{"name":"SnowDown_0.2.0_x64-setup.exe","state":"uploaded","size":3,"digest":format!("sha256:{:x}",Sha256::digest(b"abc")),"browser_download_url":"https://github.com/xiaogouyo/SnowDown/releases/download/v0.2.0/SnowDown_0.2.0_x64-setup.exe"}]})
@@ -750,7 +820,7 @@ mod tests {
         let sender = Mutex::new(Some(sender));
         let initial = updater
             .clone()
-            .start_download(move |status| {
+            .start_download(8, 0, move |status| {
                 if status.phase == Phase::Ready || status.phase == Phase::Error {
                     if let Some(sender) = sender.lock().unwrap().take() {
                         let _ = sender.send(status);
@@ -777,12 +847,12 @@ mod tests {
     async fn reserved_download_is_serialized_and_can_be_cancelled_before_worker_poll() {
         let directory = temporary();
         let updater = seeded(directory.clone());
-        let job = updater.prepare_download().unwrap();
-        assert!(updater.prepare_download().is_err());
+        let job = updater.prepare_download(8, 0).unwrap();
+        assert!(updater.prepare_download(8, 0).is_err());
         updater.cancel();
         let result = updater.run_download(job, |_| {}).await;
-        assert!(result.unwrap_err().contains("取消"));
-        assert_eq!(updater.status().phase, Phase::Error);
+        assert!(result.unwrap_err().contains("暂停"));
+        assert_eq!(updater.status().phase, Phase::Paused);
         assert!(std::fs::read_dir(&directory).unwrap().next().is_none());
         fs::remove_dir(directory).await.unwrap();
     }
@@ -833,22 +903,31 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/fixture", listener.local_addr().unwrap());
         let task = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut input = [0u8; 4096];
-            let _ = socket.read(&mut input).await;
-            let _ = socket
-                .write_all(
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut input = [0u8; 4096];
+                let count = socket.read(&mut input).await.unwrap();
+                let input = String::from_utf8_lossy(&input[..count]).to_lowercase();
+                let range = input
+                    .lines()
+                    .find_map(|line| line.strip_prefix("range: bytes="))
+                    .and_then(|v| v.split_once('-'))
+                    .and_then(|(a, b)| Some((a.parse::<usize>().ok()?, b.parse::<usize>().ok()?)));
+                let (start, end) = range.unwrap_or((0, body.len() - 1));
+                let header = if range.is_some() {
                     format!(
-                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {start}-{end}/{}\r\n",
                         body.len()
                     )
-                    .as_bytes(),
-                )
-                .await;
-            if slow {
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                } else {
+                    "HTTP/1.1 200 OK\r\n".into()
+                };
+                let _=socket.write_all(format!("{header}ETag: \"fixture\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",end-start+1).as_bytes()).await;
+                if slow {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+                let _ = socket.write_all(&body[start..=end]).await;
             }
-            let _ = socket.write_all(body).await;
         });
         (url, task)
     }
@@ -863,7 +942,7 @@ mod tests {
         let mut cancelled = updater.cancel.subscribe();
         let (url, server_task) = server(b"abd", false).await;
         assert!(updater
-            .transfer(&http, &url, &release, &mut cancelled, &|_| {})
+            .transfer(&http, &url, &release, &mut cancelled, 8, 0, &|_| {})
             .await
             .unwrap_err()
             .contains("校验失败"));
@@ -871,13 +950,13 @@ mod tests {
         assert!(std::fs::read_dir(&directory).unwrap().next().is_none());
         let (url, server_task) = server(b"abc", true).await;
         updater.progress(Phase::Downloading, 0, None);
-        let download = updater.transfer(&http, &url, &release, &mut cancelled, &|_| {});
+        let download = updater.transfer(&http, &url, &release, &mut cancelled, 8, 0, &|_| {});
         let cancel = async {
             tokio::time::sleep(Duration::from_millis(100)).await;
             updater.cancel();
         };
         let (result, _) = tokio::join!(download, cancel);
-        assert!(result.unwrap_err().contains("取消"));
+        assert!(result.unwrap_err().contains("暂停"));
         server_task.abort();
         assert!(std::fs::read_dir(&directory).unwrap().next().is_none());
         fs::remove_dir(directory).await.unwrap();
@@ -912,6 +991,8 @@ mod tests {
                 sources,
                 &client(true).unwrap(),
                 &mut updater.cancel.subscribe(),
+                8,
+                0,
                 &|status| snapshots.lock().unwrap().push(status),
             )
             .await
@@ -924,8 +1005,9 @@ mod tests {
             Some("GitHub 官方直连")
         );
         let snapshots = snapshots.into_inner().unwrap();
-        assert_eq!(snapshots.len(), 2);
-        assert!(snapshots.iter().all(|status| status.downloaded == 0));
+        assert!(snapshots
+            .iter()
+            .any(|status| status.download_source.as_deref() == Some("GitHub 官方直连")));
         let target = directory.join(&release.file_name);
         assert_eq!(fs::read(&target).await.unwrap(), b"abc");
         assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
@@ -951,6 +1033,8 @@ mod tests {
                 sources,
                 &client(true).unwrap(),
                 &mut cancelled,
+                8,
+                0,
                 &|_| panic!("cancelled selection must not start a transfer"),
             )
             .await;
@@ -960,8 +1044,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "Downloads the current public GitHub installer and verifies its hash without running it"]
     async fn live_github_release_and_verified_download() {
-        let directory =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/updater-mirrors-live-v017");
+        let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../.tools/updater-resume-live-v0110")
+            .join(uuid::Uuid::new_v4().to_string());
         let updater = Updater::new(directory.clone(), "0.0.0");
         let status = updater.check().await.unwrap();
         let release = status.release.unwrap();
@@ -969,8 +1054,29 @@ mod tests {
             "Public GitHub latest version: {}, installer bytes: {}",
             release.version, release.size
         );
+        let paused_job = updater.prepare_download(8, 1024 * 1024).unwrap();
+        let pause_result = updater
+            .run_download(paused_job, |status| {
+                if status.phase == Phase::Downloading && status.downloaded >= 2 * 1024 * 1024 {
+                    updater.cancel();
+                }
+            })
+            .await;
+        assert_eq!(pause_result.unwrap_err(), CANCELLED);
+        assert_eq!(updater.status().phase, Phase::Paused);
+        let paused_bytes = updater.status().downloaded;
+        assert!(paused_bytes > 0 && paused_bytes < release.size);
+        drop(updater);
+        let updater = Updater::new(directory.clone(), "0.0.0");
+        let reopened = updater.check().await.unwrap();
+        assert_eq!(reopened.phase, Phase::Paused);
+        assert!(reopened.downloaded > 0);
+        let resumed = std::sync::atomic::AtomicU64::new(0);
+        let peak = std::sync::atomic::AtomicUsize::new(0);
         let status = updater
             .download(|status| {
+                resumed.fetch_max(status.resumed_bytes, Ordering::Relaxed);
+                peak.fetch_max(status.active_connections, Ordering::Relaxed);
                 if status.phase == Phase::Downloading && status.downloaded == 0 {
                     eprintln!(
                         "Selected download source: {:?}, latency: {:?} ms",
@@ -981,6 +1087,14 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(status.phase, Phase::Ready);
+        assert!(resumed.load(Ordering::Relaxed) > 0);
+        assert!(peak.load(Ordering::Relaxed) > 1);
+        eprintln!(
+            "Restarted GitHub download: paused={}, resumed={}, peak={}",
+            paused_bytes,
+            resumed.load(Ordering::Relaxed),
+            peak.load(Ordering::Relaxed)
+        );
         let path = updater.verified_installer().await.unwrap();
         assert!(fs::read(&path).await.unwrap().starts_with(b"MZ"));
         fs::write(

@@ -11,7 +11,7 @@ pub fn enqueue(
         return Err("未找到 FFmpeg，暂时不能开始下载。请安装完整客户端。".into());
     }
     let mut tasks = state.tasks.lock().unwrap();
-    if state.updater.installing() {
+    if state.updater.installing() || state.stopping.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("正在退出安装更新，请完成更新后再添加下载。".into());
     }
     let batch_id = batched.then(|| uuid::Uuid::new_v4().to_string());
@@ -116,6 +116,10 @@ fn prepare(
                 downloaded_bytes: 0,
                 total_bytes: 0,
                 speed: 0,
+                active_connections: 0,
+                peak_connections: 0,
+                resumed_bytes: 0,
+                range_download: false,
                 error: None,
                 output_path: None,
                 created_at: now + added.len() as u64,

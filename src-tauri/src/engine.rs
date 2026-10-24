@@ -1,6 +1,5 @@
 use crate::{bilibili, model::*, sites, AppState};
-use futures_util::StreamExt;
-use reqwest::{header, Client, StatusCode};
+use reqwest::{header, Client};
 use serde_json::Value;
 use std::{
     path::{Path, PathBuf},
@@ -9,14 +8,17 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tauri::AppHandle;
-use tokio::{fs, io::AsyncWriteExt, process::Command};
+use tokio::{fs, process::Command};
 
 pub fn start_scheduler(app: AppHandle, state: Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
         loop {
+            if state.stopping.load(Ordering::SeqCst) {
+                break;
+            }
             let limit = state.settings.lock().unwrap().concurrency;
             let mut queued: Vec<_> = state
                 .tasks
@@ -32,7 +34,7 @@ pub fn start_scheduler(app: AppHandle, state: Arc<AppState>) {
                 // status and persisted sibling deadlines before another task can be selected.
                 let cancel = {
                     let mut tasks = state.tasks.lock().unwrap();
-                    if state.updater.installing() {
+                    if state.updater.installing() || state.stopping.load(Ordering::SeqCst) {
                         break;
                     }
                     let mut active = state.active.lock().unwrap();
@@ -143,6 +145,8 @@ fn select_streams(data: &Value, quality: u32, audio_only: bool) -> Result<Vec<St
 
 pub(crate) fn media_client(platform: Platform) -> Result<Client, String> {
     Client::builder()
+        .http1_only()
+        .pool_max_idle_per_host(16)
         .user_agent(bilibili::USER_AGENT)
         .default_headers({
             let mut headers = header::HeaderMap::new();
@@ -267,17 +271,32 @@ async fn run_task(
     });
     let mut paths = Vec::new();
     let mut offset = 0;
+    let mut resumed_offset = 0;
     for (index, url) in urls.iter().enumerate() {
         check_cancel(cancel)?;
         let file = temp_dir.join(format!("stream-{actual_quality}-{index}.part"));
-        let speed_limit = state.settings.lock().unwrap().max_speed_mbps as u64 * 1024 * 1024;
-        let downloaded = transfer(
+        let settings = state.settings.lock().unwrap().clone();
+        let identity = format!(
+            "media:{}:{}:{}:{}:{index}",
+            task.platform.key(),
+            task.bvid,
+            task.cid,
+            actual_quality
+        );
+        let downloaded = crate::transfer::download(
             &media_client,
             url,
             &file,
+            crate::transfer::Options {
+                identity: &identity,
+                expected_size: None,
+                sha256: None,
+                connections: settings.download_connections,
+                max_bytes_per_second: settings.max_speed_mbps as u64 * 1024 * 1024,
+            },
             cancel,
-            speed_limit,
-            |received, expected, speed| {
+            |stats| {
+                let (received, expected, speed) = (stats.downloaded, stats.total, stats.speed);
                 let progress = if total > 0 && sizes.iter().all(|n| *n > 0) {
                     ((offset + received) as f64 / total as f64 * 94.0).min(94.0)
                 } else {
@@ -295,12 +314,22 @@ async fn run_task(
                         t.downloaded_bytes = offset + received;
                         t.progress = progress;
                         t.speed = speed;
+                        t.active_connections = stats.active_connections;
+                        t.peak_connections = t.peak_connections.max(stats.active_connections);
+                        t.resumed_bytes = resumed_offset + stats.resumed_bytes;
+                        t.range_download = stats.ranged;
                     }
                 });
             },
         )
         .await?;
-        offset += downloaded;
+        offset += downloaded.bytes;
+        resumed_offset += downloaded.resumed_bytes;
+        let _ = state.patch_task(app, &task.id, |t| {
+            t.active_connections = 0;
+            t.peak_connections = t.peak_connections.max(downloaded.peak_connections);
+            t.range_download = downloaded.ranged;
+        });
         paths.push(file);
     }
     check_cancel(cancel)?;
@@ -463,6 +492,8 @@ async fn run_task(
     for path in paths {
         let _ = fs::remove_file(&path).await;
         let _ = fs::remove_file(path.with_extension("etag")).await;
+        crate::transfer::cleanup(&path).await;
+        crate::transfer::cleanup(&path).await;
     }
     let _ = fs::remove_file(temp_dir.join("segments.txt")).await;
     let _ = fs::remove_dir(&temp_dir).await;
@@ -498,225 +529,9 @@ pub async fn run_ffmpeg(binary: &Path, args: &[String], cancel: &AtomicBool) -> 
     }
 }
 
-pub async fn transfer<F: FnMut(u64, u64, u64)>(
-    client: &Client,
-    url: &str,
-    path: &Path,
-    cancel: &AtomicBool,
-    max_bytes_per_second: u64,
-    mut progress: F,
-) -> Result<u64, String> {
-    let mut offset = fs::metadata(path).await.map(|m| m.len()).unwrap_or(0);
-    let mut request = client.get(url);
-    if offset > 0 {
-        request = request.header(header::RANGE, format!("bytes={offset}-"));
-        if let Ok(etag) = fs::read_to_string(path.with_extension("etag")).await {
-            request = request.header(header::IF_RANGE, etag);
-        }
-    }
-    let response = tokio::select! {
-        result = request.send() => result.map_err(|e| format!("下载连接失败：{e}"))?,
-        _ = wait_cancel(cancel) => return Err("任务已暂停或取消".into()),
-    };
-    let status = response.status();
-    if status == StatusCode::RANGE_NOT_SATISFIABLE {
-        let remote_total = response
-            .headers()
-            .get(header::CONTENT_RANGE)
-            .and_then(|h| h.to_str().ok())
-            .and_then(|s| s.strip_prefix("bytes */"))
-            .and_then(|n| n.parse::<u64>().ok());
-        if remote_total == Some(offset) && offset > 0 {
-            progress(offset, offset, 0);
-            return Ok(offset);
-        }
-        // A changed resource must be fetched anew, never append it to stale bytes.
-        fs::write(path, []).await.map_err(|e| e.to_string())?;
-        return Err("源文件已变化，正在重新获取完整文件。".into());
-    }
-    if !status.is_success() {
-        return Err(format!(
-            "下载源返回 HTTP {status}，可稍后重试或检查登录状态。"
-        ));
-    }
-    let total;
-    if status == StatusCode::PARTIAL_CONTENT {
-        let range = response
-            .headers()
-            .get(header::CONTENT_RANGE)
-            .and_then(|h| h.to_str().ok())
-            .ok_or("下载源缺少断点校验信息")?;
-        let (start, remote_total) =
-            parse_content_range(range).ok_or("下载源返回了无效的断点范围")?;
-        if start != offset {
-            return Err("下载源的断点位置不一致，已停止以避免文件损坏。".into());
-        }
-        total = remote_total;
-    } else {
-        offset = 0;
-        total = response.content_length().unwrap_or(0);
-    }
-    if let Some(etag) = response
-        .headers()
-        .get(header::ETAG)
-        .and_then(|v| v.to_str().ok())
-    {
-        let _ = fs::write(path.with_extension("etag"), etag).await;
-    }
-    let mut options = fs::OpenOptions::new();
-    options.create(true).write(true);
-    if offset > 0 {
-        options.append(true);
-    } else {
-        options.truncate(true);
-    }
-    let mut file = options
-        .open(path)
-        .await
-        .map_err(|e| format!("无法写入文件：{e}"))?;
-    let start = Instant::now();
-    let mut sample_time = Instant::now();
-    let mut sample_bytes = offset;
-    let mut received = offset;
-    let mut stream = response.bytes_stream();
-    loop {
-        let next = tokio::select! {
-            item = stream.next() => item,
-            _ = wait_cancel(cancel) => { file.flush().await.map_err(|e| e.to_string())?; return Err("任务已暂停或取消".into()); }
-        };
-        let Some(chunk) = next else {
-            break;
-        };
-        check_cancel(cancel)?;
-        let chunk = chunk.map_err(|e| format!("下载中断：{e}"))?;
-        file.write_all(&chunk)
-            .await
-            .map_err(|e| format!("磁盘写入失败：{e}"))?;
-        received += chunk.len() as u64;
-        if max_bytes_per_second > 0 {
-            let expected =
-                Duration::from_secs_f64((received - offset) as f64 / max_bytes_per_second as f64);
-            if expected > start.elapsed() {
-                tokio::select! { _ = tokio::time::sleep(expected - start.elapsed()) => {}, _ = wait_cancel(cancel) => return Err("任务已暂停或取消".into()) }
-            }
-        }
-        let elapsed = sample_time.elapsed().as_secs_f64();
-        if elapsed >= 0.35 {
-            progress(
-                received,
-                total,
-                ((received - sample_bytes) as f64 / elapsed) as u64,
-            );
-            sample_time = Instant::now();
-            sample_bytes = received;
-        }
-    }
-    file.flush().await.map_err(|e| e.to_string())?;
-    if total > 0 && received != total {
-        return Err(format!(
-            "文件长度校验失败：应为 {total} 字节，实际为 {received} 字节。"
-        ));
-    }
-    progress(received, total, 0);
-    Ok(received)
-}
-
-fn parse_content_range(value: &str) -> Option<(u64, u64)> {
-    let value = value.strip_prefix("bytes ")?;
-    let (range, total) = value.split_once('/')?;
-    let (start, end) = range.split_once('-')?;
-    let (start, end, total) = (
-        start.parse::<u64>().ok()?,
-        end.parse::<u64>().ok()?,
-        total.parse::<u64>().ok()?,
-    );
-    if start > end || end >= total {
-        return None;
-    }
-    Some((start, total))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        net::TcpListener,
-    };
-    #[test]
-    fn ranges_are_strictly_validated() {
-        assert_eq!(parse_content_range("bytes 5-9/10"), Some((5, 10)));
-        assert_eq!(parse_content_range("bytes 9-5/10"), None);
-        assert_eq!(parse_content_range("bytes 0-10/10"), None);
-        assert_eq!(parse_content_range("bytes */10"), None);
-    }
-    async fn fixture(response: &'static str) -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut buffer = [0; 4096];
-            let _ = socket.read(&mut buffer).await;
-            socket.write_all(response.as_bytes()).await.unwrap();
-        });
-        format!("http://{address}/file")
-    }
-    #[tokio::test]
-    async fn ignored_range_restarts_instead_of_corrupting_file() {
-        let path = std::env::temp_dir().join(format!("snowdown-{}.part", uuid::Uuid::new_v4()));
-        fs::write(&path, b"old").await.unwrap();
-        let url =
-            fixture("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello").await;
-        transfer(
-            &Client::new(),
-            &url,
-            &path,
-            &AtomicBool::new(false),
-            0,
-            |_, _, _| {},
-        )
-        .await
-        .unwrap();
-        assert_eq!(fs::read(&path).await.unwrap(), b"hello");
-        let _ = fs::remove_file(path).await;
-    }
-    #[tokio::test]
-    async fn correct_partial_range_resumes() {
-        let path = std::env::temp_dir().join(format!("snowdown-{}.part", uuid::Uuid::new_v4()));
-        fs::write(&path, b"hel").await.unwrap();
-        let url = fixture("HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 3-4/5\r\nContent-Length: 2\r\nConnection: close\r\n\r\nlo").await;
-        transfer(
-            &Client::new(),
-            &url,
-            &path,
-            &AtomicBool::new(false),
-            0,
-            |_, _, _| {},
-        )
-        .await
-        .unwrap();
-        assert_eq!(fs::read(&path).await.unwrap(), b"hello");
-        let _ = fs::remove_file(path).await;
-    }
-    #[tokio::test]
-    async fn wrong_partial_range_leaves_existing_file_intact() {
-        let path = std::env::temp_dir().join(format!("snowdown-{}.part", uuid::Uuid::new_v4()));
-        fs::write(&path, b"hel").await.unwrap();
-        let url = fixture("HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-1/5\r\nContent-Length: 2\r\nConnection: close\r\n\r\nlo").await;
-        assert!(transfer(
-            &Client::new(),
-            &url,
-            &path,
-            &AtomicBool::new(false),
-            0,
-            |_, _, _| {}
-        )
-        .await
-        .is_err());
-        assert_eq!(fs::read(&path).await.unwrap(), b"hel");
-        let _ = fs::remove_file(path).await;
-    }
-
     #[tokio::test]
     async fn bundled_ffmpeg_produces_a_playable_audio_video_file() {
         let resources = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
@@ -801,9 +616,56 @@ mod tests {
         let mut files = Vec::new();
         for (index, url) in urls.iter().enumerate() {
             let path = directory.join(format!("stream-{index}.part"));
-            let size = transfer(&client, url, &path, &cancel, 0, |_, _, _| {})
-                .await
-                .unwrap();
+            let identity = format!("live-public-media-{index}");
+            if index == 0 {
+                let partial = crate::transfer::download(
+                    &client,
+                    url,
+                    &path,
+                    crate::transfer::Options {
+                        identity: &identity,
+                        expected_size: None,
+                        sha256: None,
+                        connections: 8,
+                        max_bytes_per_second: 1024 * 1024,
+                    },
+                    &cancel,
+                    |stats| {
+                        if stats.downloaded >= 256 * 1024 {
+                            cancel.store(true, Ordering::Relaxed)
+                        }
+                    },
+                )
+                .await;
+                assert_eq!(partial.unwrap_err(), crate::transfer::CANCELLED);
+                assert!(crate::transfer::saved_bytes(&path, &identity).await > 0);
+                cancel.store(false, Ordering::Relaxed);
+            }
+            let outcome = crate::transfer::download(
+                &media_client(Platform::Bilibili).unwrap(),
+                url,
+                &path,
+                crate::transfer::Options {
+                    identity: &identity,
+                    expected_size: None,
+                    sha256: None,
+                    connections: 8,
+                    max_bytes_per_second: 0,
+                },
+                &cancel,
+                |_| {},
+            )
+            .await
+            .unwrap();
+            if index == 0 {
+                assert!(outcome.resumed_bytes > 0);
+                assert!(outcome.peak_connections > 1);
+            }
+            eprintln!(
+                "Live stream {index}: ranged={}, peak={}, resumed={} bytes",
+                outcome.ranged, outcome.peak_connections, outcome.resumed_bytes
+            );
+            let size = outcome.bytes;
             assert!(size > 0);
             eprintln!("Live download stream {index}: {size} bytes");
             files.push(path);

@@ -91,3 +91,5 @@ input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer
 :root.tray-page,:root.tray-page body,:root.tray-page #app{background:transparent;overflow:hidden;width:100%;height:100%}
 
 .standard-mode{display:flex;width:100%;height:100%;min-width:0}.standard-mode .brand{background:transparent;text-align:left}.mode-standard-enter-active,.mode-standard-leave-active,.mode-minimal-enter-active,.mode-minimal-leave-active{transition:opacity .36s ease,transform .36s cubic-bezier(.22,.75,.22,1)}.mode-standard-leave-active,.mode-minimal-leave-active{position:absolute;inset:0;pointer-events:none}.mode-standard-enter-from,.mode-standard-leave-to{opacity:0;transform:translateX(-18px) scale(.988)}.mode-minimal-enter-from,.mode-minimal-leave-to{opacity:0;transform:translateY(12px) scale(.985)}@media(prefers-reduced-motion:reduce){.mode-standard-enter-active,.mode-standard-leave-active,.mode-minimal-enter-active,.mode-minimal-leave-active{transition:none}}
+
+.transfer-resumed{display:block;color:#8ba0ba;font-size:10px;margin-top:5px}

@@ -16,7 +16,7 @@ async fn wait(app: &AppHandle, script: &str, ticks: usize) -> bool {
 
 async fn progress(value: Value) {
     let _ = tokio::fs::write(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/v019-qa-progress.json"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/v0110-qa-progress.json"),
         serde_json::to_vec_pretty(&value).unwrap(),
     )
     .await;
@@ -90,7 +90,7 @@ async fn capture(app: &AppHandle, name: &str) -> bool {
     let Ok(Ok(bytes)) = tokio::time::timeout(Duration::from_secs(10), receiver).await else {
         return false;
     };
-    let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/v019-screenshots");
+    let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/v0110-screenshots");
     let _ = tokio::fs::create_dir_all(&directory).await;
     tokio::fs::write(directory.join(format!("{name}.png")), bytes)
         .await
@@ -107,6 +107,12 @@ pub fn start(app: AppHandle) {
         tokio::time::sleep(Duration::from_secs(6)).await;
         let state = app.state::<Arc<AppState>>();
         let window = app.get_webview_window("main").unwrap();
+        progress(json!({"stage":"initial renderer","url":window.url().ok().map(|url|url.to_string()),"dom":evaluate(&app,"JSON.stringify({url:location.href,ready:document.readyState,html:document.body.innerHTML.slice(0,3000),scripts:[...document.scripts].map(s=>s.src)})").await})).await;
+        if !wait(&app, "!!document.querySelector('.standard-mode')", 30).await {
+            app.exit(1);
+            return;
+        }
+        state.settings.lock().unwrap().max_speed_mbps = 2;
         let _ = evaluate(
             &app,
             "document.querySelector('[aria-label=\"关闭版本更新\"]')?.click();true",
@@ -146,7 +152,7 @@ pub fn start(app: AppHandle) {
             let failure = json!({"success":false,"stage":"parse did not complete","center":center,"ui":evaluate(&app,"document.body.innerText").await});
             let _ = tokio::fs::write(
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("../.tools/v019-minimal-verification.json"),
+                    .join("../.tools/v0110-minimal-verification.json"),
                 serde_json::to_vec_pretty(&failure).unwrap(),
             )
             .await;
@@ -218,6 +224,46 @@ pub fn start(app: AppHandle) {
             }
             let _=evaluate(&app,"(()=>{const b=document.querySelector('.update-download:not(:disabled)');if(!b)return false;b.click();return true})()").await;
             tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+        let mut update_paused = false;
+        for _ in 0..1200 {
+            let current = state.updater.status();
+            if current.phase == Phase::Downloading && current.downloaded >= 1024 * 1024 {
+                let _=evaluate(&app,"[...document.querySelectorAll('.update-actions button')].find(b=>b.textContent.includes('暂停下载'))?.click();true").await;
+                break;
+            }
+            if matches!(current.phase, Phase::Ready | Phase::Error) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        for _ in 0..100 {
+            if state.updater.status().phase == Phase::Paused {
+                update_paused = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let paused_ui = wait(
+            &app,
+            "document.querySelector('.update-download')?.textContent.includes('继续下载')===true",
+            40,
+        )
+        .await;
+        let _ = capture(&app, "update-paused").await;
+        let _ = evaluate(
+            &app,
+            "document.querySelector('.update-download')?.click();true",
+        )
+        .await;
+        for _ in 0..60 {
+            if matches!(
+                state.updater.status().phase,
+                Phase::Probing | Phase::Downloading
+            ) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
         let start_ui=evaluate(&app,"JSON.stringify({error:document.querySelector('.update-error')?.textContent,heading:document.querySelector('#update-title')?.textContent,background:!!document.querySelector('.update-background')})").await.unwrap_or_default();
         let _ = capture(&app, "update-start").await;
@@ -297,15 +343,17 @@ pub fn start(app: AppHandle) {
             && media_complete
             && inline_progress
             && update_available
+            && update_paused
+            && paused_ui
             && started
             && panel_closed
             && hidden_active
             && verified
             && update_restored;
-        let report = json!({"success":success,"center":center,"animationMiddleTop":middle,"top":top,"minimum":minimum,"animation":animation,"parsed":parsed,"mediaComplete":media_complete,"mediaError":media_error,"inlineProgress":inline_progress,"updateAvailable":update_available,"updateStarted":started,"startUi":start_ui,"panelClosed":panel_closed,"hiddenUpdateContinued":hidden_active,"updateReady":update_ready,"installerHashVerified":verified,"installerExecuted":false,"updateRestored":update_restored,"updateError":update_error,"screenshots":{"empty":empty_image,"parsed":result_image,"minimum":minimum_image,"downloaded":media_image,"updateReady":update_image},"systemClipboardModified":false});
+        let report = json!({"success":success,"center":center,"animationMiddleTop":middle,"top":top,"minimum":minimum,"animation":animation,"parsed":parsed,"mediaComplete":media_complete,"mediaError":media_error,"inlineProgress":inline_progress,"updatePaused":update_paused,"pausedUi":paused_ui,"mediaConnections":state.tasks.lock().unwrap().first().map(|task|task.peak_connections),"updateResumedBytes":state.updater.status().resumed_bytes,"updateAvailable":update_available,"updateStarted":started,"startUi":start_ui,"panelClosed":panel_closed,"hiddenUpdateContinued":hidden_active,"updateReady":update_ready,"installerHashVerified":verified,"installerExecuted":false,"updateRestored":update_restored,"updateError":update_error,"screenshots":{"empty":empty_image,"parsed":result_image,"minimum":minimum_image,"downloaded":media_image,"updateReady":update_image},"systemClipboardModified":false});
         let _ = tokio::fs::write(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../.tools/v019-minimal-verification.json"),
+                .join("../.tools/v0110-minimal-verification.json"),
             serde_json::to_vec_pretty(&report).unwrap(),
         )
         .await;

@@ -23,6 +23,23 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); vi.useRealTimers(); document.body.innerHTML = '' })
 
 describe('GitHub update center', () => {
+  it('pauses without discarding progress and resumes a persisted native download', async () => {
+    const saved: UpdateStatus = { ...available, revision: 5, phase: 'paused', downloaded: 512, resumedBytes: 256 };
+    api.getUpdateStatus.mockResolvedValue(saved)
+    await wrapper.get('button').trigger('click'); await flushPromises()
+    expect(api.checkUpdate).not.toHaveBeenCalled()
+    expect(dialog().textContent).toContain('更新下载已暂停')
+    expect(dialog().querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('50')
+    expect(dialog().querySelector('.update-download')?.textContent).toContain('继续下载')
+    api.downloadUpdate.mockResolvedValue({ ...saved, revision: 6, phase: 'downloading', activeConnections: 8, speed: 1024 })
+    click('.update-download'); await flushPromises()
+    expect(dialog().textContent).toContain('8 个连接')
+    const pause = [...dialog().querySelectorAll('button')].find(button => button.textContent?.includes('暂停下载'))!
+    pause.click(); await flushPromises()
+    expect(api.cancelUpdateDownload).toHaveBeenCalledTimes(1)
+    api.subscribeUpdates.mock.calls[0]![0]({ ...saved, revision: 7 }); await flushPromises()
+    expect(dialog().querySelector('.update-download')?.textContent).toContain('继续下载')
+  })
   it('blocks a new download while synchronizing the native state on reopen', async () => {
     await flushPromises()
     api.subscribeUpdates.mock.calls[0]![0]({ ...available, revision: 1 })

@@ -44,6 +44,9 @@ impl Platform {
 fn enabled() -> bool {
     true
 }
+fn default_connections() -> usize {
+    8
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +54,8 @@ pub struct Settings {
     pub download_dir: String,
     pub concurrency: usize,
     pub max_speed_mbps: u32,
+    #[serde(default = "default_connections")]
+    pub download_connections: usize,
     pub save_cover: bool,
     pub save_danmaku: bool,
     pub save_subtitles: bool,
@@ -134,6 +139,14 @@ pub struct DownloadTask {
     pub downloaded_bytes: u64,
     pub total_bytes: u64,
     pub speed: u64,
+    #[serde(default)]
+    pub active_connections: usize,
+    #[serde(default)]
+    pub peak_connections: usize,
+    #[serde(default)]
+    pub resumed_bytes: u64,
+    #[serde(default)]
+    pub range_download: bool,
     pub error: Option<String>,
     pub output_path: Option<String>,
     pub created_at: u64,
@@ -231,6 +244,7 @@ mod tests {
         let settings: Settings = serde_json::from_value(serde_json::json!({"downloadDir":"D:\\videos","concurrency":2,"maxSpeedMbps":0,"saveCover":false,"saveDanmaku":false,"saveSubtitles":false})).unwrap();
         assert!(settings.clipboard_enabled);
         assert!(!settings.clipboard_auto_parse);
+        assert_eq!(settings.download_connections, 8);
         let video: VideoInfo = serde_json::from_value(serde_json::json!({"bvid":"BV1xx411c7mD","title":"legacy","cover":"","author":"","duration":1,"pages":[],"qualities":[],"selectedCid":1})).unwrap();
         assert_eq!(video.platform, Platform::Bilibili);
         assert!(video.source_url.is_empty());

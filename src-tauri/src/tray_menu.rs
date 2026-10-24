@@ -101,7 +101,7 @@ pub fn action(app: &AppHandle, action: Action) -> Result<(), String> {
     match action {
         Action::Show => show_main(app),
         Action::Folder => (),
-        Action::Quit => app.exit(0),
+        Action::Quit => crate::quit_after_checkpoint(app),
         Action::Dismiss => (),
     }
     Ok(())

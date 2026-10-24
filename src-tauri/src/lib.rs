@@ -17,6 +17,7 @@ mod qr_login;
 mod site_sessions;
 mod sites;
 mod storage;
+mod transfer;
 mod tray_menu;
 mod update_mirrors;
 mod updater;
@@ -48,6 +49,7 @@ pub struct AppState {
     ffmpeg: Option<PathBuf>,
     updater: Arc<updater::Updater>,
     clipboard: clipboard_watch::Monitor,
+    stopping: AtomicBool,
 }
 
 impl AppState {
@@ -81,11 +83,56 @@ impl AppState {
             let mut tasks = self.tasks.lock().unwrap();
             let task = tasks.iter_mut().find(|t| t.id == id).ok_or("任务不存在")?;
             update(task);
+            if task.status != TaskStatus::Downloading {
+                task.active_connections = 0;
+                task.speed = 0;
+            }
             self.storage.save_task(task)?;
         }
         self.emit(app);
         Ok(())
     }
+}
+
+pub(crate) fn quit_after_checkpoint(app: &AppHandle) {
+    let state = app.state::<Arc<AppState>>().inner().clone();
+    if state.stopping.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    {
+        let mut tasks = state.tasks.lock().unwrap();
+        for cancel in state.active.lock().unwrap().values() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        for task in tasks.iter_mut().filter(|task| {
+            matches!(
+                task.status,
+                TaskStatus::Queued | TaskStatus::Downloading | TaskStatus::Merging
+            )
+        }) {
+            task.status = TaskStatus::Paused;
+            task.speed = 0;
+            task.active_connections = 0;
+            let _ = state.storage.save_task(task);
+        }
+    }
+    state.updater.cancel();
+    let app = app.clone();
+    state.emit(&app);
+    tauri::async_runtime::spawn(async move {
+        for _ in 0..80 {
+            if state.active.lock().unwrap().is_empty()
+                && !matches!(
+                    state.updater.status().phase,
+                    updater::Phase::Downloading | updater::Phase::Probing
+                )
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        app.exit(0);
+    });
 }
 
 #[tauri::command]
@@ -118,9 +165,14 @@ fn download_update(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
 ) -> Result<updater::UpdateStatus, String> {
-    state.updater.clone().start_download(move |status| {
-        let _ = app.emit("snowdown://update", status);
-    })
+    let settings = state.settings.lock().unwrap().clone();
+    state.updater.clone().start_download(
+        settings.download_connections,
+        settings.max_speed_mbps as u64 * 1024 * 1024,
+        move |status| {
+            let _ = app.emit("snowdown://update", status);
+        },
+    )
 }
 
 #[tauri::command]
@@ -349,8 +401,11 @@ fn save_settings(
     if !PathBuf::from(&settings.download_dir).is_absolute() {
         return Err("下载目录必须是绝对路径。".into());
     }
-    if !(1..=4).contains(&settings.concurrency) || settings.max_speed_mbps > 1024 {
-        return Err("并发数应为1至4，单任务限速应在0至1024 MB/s之间。".into());
+    if !(1..=4).contains(&settings.concurrency)
+        || settings.max_speed_mbps > 1024
+        || !(1..=16).contains(&settings.download_connections)
+    {
+        return Err("任务并发数应为1至4，每文件连接数为1至16，限速为0至1024 MB/s。".into());
     }
     std::fs::create_dir_all(&settings.download_dir).map_err(|e| format!("无法使用此目录：{e}"))?;
     state.storage.save_settings(&settings)?;
@@ -533,6 +588,7 @@ pub fn run() {
                     download_dir: default_download.to_string_lossy().to_string(),
                     concurrency: 2,
                     max_speed_mbps: 0,
+                    download_connections: 8,
                     save_cover: false,
                     save_danmaku: false,
                     save_subtitles: false,
@@ -555,6 +611,7 @@ pub fn run() {
                     updater_version,
                 )),
                 clipboard: clipboard_watch::Monitor::default(),
+                stopping: AtomicBool::new(false),
             });
             app.manage(state.clone());
             tray_menu::create(&handle)?;

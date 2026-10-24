@@ -6,6 +6,7 @@ export interface SourceLink { platform: Platform; url: string }
 export interface Settings {
   downloadDir: string
   concurrency: number
+  downloadConnections?: number
   maxSpeedMbps: number
   saveCover: boolean
   saveDanmaku: boolean
@@ -47,6 +48,10 @@ export interface DownloadTask {
   downloadedBytes: number
   totalBytes: number
   speed: number
+  activeConnections?: number
+  peakConnections?: number
+  resumedBytes?: number
+  rangeDownload?: boolean
   error: string | null
   outputPath: string | null
   createdAt: number
@@ -118,7 +123,7 @@ export interface UpdateStatus {
   revision: number
   currentVersion: string
   release: UpdateRelease | null
-  phase: 'idle' | 'probing' | 'downloading' | 'ready' | 'installing' | 'error'
+  phase: 'idle' | 'probing' | 'downloading' | 'paused' | 'ready' | 'installing' | 'error'
   downloaded: number
   total: number
   error: string | null
@@ -126,4 +131,8 @@ export interface UpdateStatus {
   downloadSource: string | null
   latencyMs: number | null
   mirrors: UpdateMirror[]
+  activeConnections?: number
+  resumedBytes?: number
+  speed?: number
+  rangeDownload?: boolean
 }

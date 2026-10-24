@@ -35,6 +35,7 @@ impl Storage {
                 task.error = Some("上次下载已中断，点击继续可从本地记录恢复。".into());
             }
             task.speed = 0;
+            task.active_connections = 0;
             tasks.push(task);
         }
         Ok(tasks)
@@ -117,6 +118,7 @@ mod tests {
             download_dir: "D:\\视频".into(),
             concurrency: 2,
             max_speed_mbps: 0,
+            download_connections: 8,
             save_cover: true,
             save_danmaku: false,
             save_subtitles: false,

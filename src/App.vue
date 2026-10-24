@@ -46,7 +46,7 @@ const batchButton = ref<HTMLButtonElement>()
 const updateCenter = ref<InstanceType<typeof UpdateCenter>>()
 const updateOpen = ref(false)
 const settingsTab = ref<'download' | 'account'>('download')
-const settingsDraft = reactive<Settings>({ downloadDir: '', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false })
+const settingsDraft = reactive<Settings>({ downloadDir: '', concurrency: 2, downloadConnections: 8, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false })
 const accountPlatform = ref<Platform>('bilibili')
 const clipboardSuggestion = ref<SourceLink | null>(null)
 const pendingClipboard = ref<ClipboardCapture | null>(null)
@@ -60,6 +60,7 @@ let checkingClipboard = false
 const detectedSource = computed(() => identifySource(link.value))
 const platformList: Platform[] = ['bilibili', 'douyin', 'xiaohongshu']
 const filterOptions = [{ value: 'all', label: '全部状态' }, { value: 'downloading', label: '进行中' }, { value: 'paused', label: '已暂停' }, { value: 'failed', label: '失败' }]
+const connectionOptions = [1, 2, 4, 8, 16].map(value => ({ value, label: `${value} 个连接${value === 8 ? "（推荐）" : ""}` }))
 const concurrencyOptions = [1, 2, 3, 4].map(value => ({ value, label: `${value} 个任务` }))
 const siteSessionSaved = computed(() => snapshot.value?.siteSessions.some(site => site.platform === accountPlatform.value && site.saved))
 const loginQr = ref<LoginQr | null>(null)
@@ -522,7 +523,8 @@ onUnmounted(() => { disposed = true; parseGeneration++; unsubscribe?.(); unwatch
                   <div class="task-title-line"><h3 :title="task.title">{{ task.title }}</h3><span :class="['status-tag', task.status]">{{ statusLabels[task.status] }}</span></div>
                   <div class="task-meta"><span :class="['task-platform', task.platform]">{{ platformLabels[task.platform ?? 'bilibili'] }}</span><i></i><span v-if="task.format === 'audio'"><Music2 :size="11" />M4A</span><span v-else>MP4 · {{ task.qualityLabel }}</span><i></i><span class="page-title" :title="task.pageTitle">{{ task.platform === 'bilibili' || !task.platform ? `P${task.page} · ` : '' }}{{ task.pageTitle }}</span></div>
                   <div v-if="['downloading', 'merging', 'paused', 'queued'].includes(task.status)" class="progress-track"><div :class="{ paused: task.status === 'paused' }" :style="{ width: `${Math.min(task.progress, 100)}%` }"></div></div>
-                  <div class="task-detail"><span v-if="task.error" class="task-error" :title="task.error">{{ task.error }}</span><span v-else-if="task.warning" class="task-warning" :title="task.warning">{{ task.warning }}</span><span v-else-if="task.status === 'completed'">{{ bytes(task.totalBytes) }}<span class="detail-separator">·</span>已保存到下载目录</span><span v-else-if="task.status === 'queued' && task.startIntervalSecs">等待下载<span class="detail-separator">·</span>同批启动间隔 {{ task.startIntervalSecs }} 秒</span><span v-else>{{ bytes(task.downloadedBytes) }}<template v-if="task.totalBytes"> / {{ bytes(task.totalBytes) }}</template></span><span v-if="task.status === 'downloading'" class="task-speed">{{ bytes(task.speed) }}/s<span class="detail-separator">·</span>{{ task.progress.toFixed(1) }}%</span><span v-else-if="task.status === 'merging'">正在生成完整文件…</span></div>
+                  <div class="task-detail"><span v-if="task.error" class="task-error" :title="task.error">{{ task.error }}</span><span v-else-if="task.warning" class="task-warning" :title="task.warning">{{ task.warning }}</span><span v-else-if="task.status === 'completed'">{{ bytes(task.totalBytes) }}<span class="detail-separator">·</span>已保存到下载目录</span><span v-else-if="task.status === 'queued' && task.startIntervalSecs">等待下载<span class="detail-separator">·</span>同批启动间隔 {{ task.startIntervalSecs }} 秒</span><span v-else>{{ bytes(task.downloadedBytes) }}<template v-if="task.totalBytes"> / {{ bytes(task.totalBytes) }}</template></span><span v-if="task.status === 'downloading'" class="task-speed">{{ bytes(task.speed) }}/s<template v-if="task.activeConnections"> · {{ task.activeConnections }} 连接</template><span class="detail-separator">·</span>{{ task.progress.toFixed(1) }}%</span><span v-else-if="task.status === 'merging'">正在生成完整文件…</span></div>
+                  <small v-if="task.resumedBytes" class="transfer-resumed">已续传 {{ bytes(task.resumedBytes) }}</small>
                 </div>
                 <div class="task-actions">
                   <button v-if="['queued', 'downloading'].includes(task.status)" class="icon-button" title="暂停下载" @click="action(task, 'pause')"><Pause :size="17" /></button>
@@ -540,7 +542,7 @@ onUnmounted(() => { disposed = true; parseGeneration++; unsubscribe?.(); unwatch
         <div class="workspace-note"><span class="note-icon"><ShieldCheck :size="16" /></span><div><strong>安心收藏，文件始终在你手中</strong><p>视频直接保存到本地。关闭窗口后，SnowDown 会在系统托盘继续下载。</p></div><span class="note-decoration"><Snowflake :size="33" :stroke-width="1" /></span></div>
       </main>
 
-      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="updateCenter?.open()">v{{ snapshot?.version ?? '0.1.9' }}</button></div></footer>
+      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="updateCenter?.open()">v{{ snapshot?.version ?? '0.1.10' }}</button></div></footer>
     </div>
 
     </div></Transition>
@@ -569,7 +571,7 @@ onUnmounted(() => { disposed = true; parseGeneration++; unsubscribe?.(); unwatch
         <div class="settings-tabs"><button :class="{ active: settingsTab === 'download' }" @click="settingsTab = 'download'"><SlidersHorizontal :size="15" />下载设置</button><button :class="{ active: settingsTab === 'account' }" @click="settingsTab = 'account'"><UserRound :size="15" />平台账号</button></div>
         <div v-if="settingsTab === 'download'" class="settings-content">
           <label class="field-label">下载位置</label><div class="folder-field"><FolderOpen :size="17" /><input v-model="settingsDraft.downloadDir" placeholder="选择本地文件夹" aria-label="下载位置" /><button @click="chooseFolder">浏览</button></div>
-          <div class="settings-two-col"><div><span class="field-label">同时下载任务数</span><UiSelect :model-value="settingsDraft.concurrency" :options="concurrencyOptions" label="同时下载任务数" @update:model-value="value => settingsDraft.concurrency = Number(value)" /></div><label><span class="field-label">单任务限速（MB/s）</span><input v-model.number="settingsDraft.maxSpeedMbps" type="number" min="0" max="1024" /><small>设为 0 表示不限速</small></label></div>
+          <div class="settings-two-col"><div><span class="field-label">同时下载任务数</span><UiSelect :model-value="settingsDraft.concurrency" :options="concurrencyOptions" label="同时下载任务数" @update:model-value="value => settingsDraft.concurrency = Number(value)" /></div><div><span class="field-label">每文件下载连接数</span><UiSelect :model-value="settingsDraft.downloadConnections ?? 8" :options="connectionOptions" label="每文件下载连接数" @update:model-value="value => settingsDraft.downloadConnections = Number(value)" /><small>视频与更新共用；服务器支持时并行分段，继续下载后生效</small></div></div><div class="settings-two-col"><label><span class="field-label">单任务限速（MB/s）</span><input v-model.number="settingsDraft.maxSpeedMbps" type="number" min="0" max="1024" /><small>设为 0 表示不限速</small></label></div>
           <div class="settings-divider"></div><h3 class="settings-section-title">剪贴板与快速解析</h3>
           <label class="toggle-row"><span><ClipboardPaste :size="17" /><span>识别剪贴板链接<small>后台持续识别支持的平台链接，关闭到托盘后仍生效</small></span></span><input v-model="settingsDraft.clipboardEnabled" type="checkbox" role="switch" /></label>
           <label class="toggle-row"><span><Link2 :size="17" /><span>识别后自动解析<small>后台准备最新链接，回到窗口查看；不会自动下载</small></span></span><input v-model="settingsDraft.clipboardAutoParse" :disabled="!settingsDraft.clipboardEnabled" type="checkbox" role="switch" /></label>
@@ -616,6 +618,6 @@ onUnmounted(() => { disposed = true; parseGeneration++; unsubscribe?.(); unwatch
       </section>
     </div>
 
-    <div v-if="dialog === 'about' && !simpleMode" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.9' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="openUpdateCenter">检查更新<RotateCcw :size="14" /></button></section></div>
+    <div v-if="dialog === 'about' && !simpleMode" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.10' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="openUpdateCenter">检查更新<RotateCcw :size="14" /></button></section></div>
   </div>
 </template>
