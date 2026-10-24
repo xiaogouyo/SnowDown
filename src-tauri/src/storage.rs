@@ -62,6 +62,22 @@ impl Storage {
         Ok(())
     }
 
+    /// Commit a whole enqueue/start reservation before exposing it to the scheduler.
+    pub fn save_tasks(&self, tasks: &[DownloadTask]) -> Result<(), String> {
+        let mut db = self.connection.lock().map_err(|e| e.to_string())?;
+        let transaction = db.transaction().map_err(|e| e.to_string())?;
+        for task in tasks {
+            let body = serde_json::to_string(task).map_err(|e| e.to_string())?;
+            transaction
+                .execute(
+                    "INSERT OR REPLACE INTO tasks (id, body) VALUES (?1, ?2)",
+                    params![task.id, body],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        transaction.commit().map_err(|e| e.to_string())
+    }
+
     pub fn load_settings(&self, defaults: Settings) -> Result<Settings, String> {
         let db = self.connection.lock().map_err(|e| e.to_string())?;
         let mut stmt = db
@@ -110,5 +126,17 @@ mod tests {
             store.load_settings(settings).unwrap().download_dir,
             "D:\\视频"
         );
+    }
+
+    #[test]
+    fn batch_write_rolls_back_every_row_if_one_insert_fails() {
+        let store = Storage::open(Path::new(":memory:")).unwrap();
+        store.connection.lock().unwrap().execute_batch("CREATE TRIGGER reject_bad_task BEFORE INSERT ON tasks WHEN NEW.id='bad' BEGIN SELECT RAISE(ABORT, 'test failure'); END;").unwrap();
+        let task_json = serde_json::json!({"id":"good","bvid":"BV1xx411c7mD","cid":1,"title":"test","pageTitle":"P1","page":1,"cover":"","quality":32,"qualityLabel":"480P","format":"video","status":"queued","progress":0.0,"downloadedBytes":0,"totalBytes":0,"speed":0,"error":null,"outputPath":null,"createdAt":0,"downloadDir":"D:\\videos","saveCover":false,"saveDanmaku":false,"saveSubtitles":false,"warning":null});
+        let good: DownloadTask = serde_json::from_value(task_json).unwrap();
+        let mut bad = good.clone();
+        bad.id = "bad".into();
+        assert!(store.save_tasks(&[good, bad]).is_err());
+        assert!(store.load_tasks().unwrap().is_empty());
     }
 }

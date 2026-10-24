@@ -2,7 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import type { AppSnapshot, CreateTaskRequest, Settings, VideoInfo, LoginQr, LoginPoll, Platform, SourceLink } from './types'
+import type { AppSnapshot, CreateTaskRequest, CreateBatchRequest, BatchResult, Settings, VideoInfo, LoginQr, LoginPoll, Platform, SourceLink } from './types'
 
 export const desktop = isTauri()
 
@@ -11,7 +11,7 @@ export async function getSnapshot(): Promise<AppSnapshot> {
     tasks: [],
     settings: { downloadDir: '', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
     siteSessions: [],
-    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.4',
+    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.5',
   }
   return invoke('get_snapshot')
 }
@@ -28,6 +28,11 @@ export async function inspectVideo(input: string): Promise<VideoInfo> {
 export async function createTasks(request: CreateTaskRequest): Promise<void> {
   requireDesktop()
   await invoke('create_tasks', { request })
+}
+
+export async function createBatch(request: CreateBatchRequest): Promise<BatchResult> {
+  requireDesktop()
+  return invoke('create_batch_tasks', { request })
 }
 
 export async function taskAction(id: string, action: 'pause' | 'resume' | 'cancel' | 'remove' | 'reveal'): Promise<void> {

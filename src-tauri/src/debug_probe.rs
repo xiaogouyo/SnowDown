@@ -220,13 +220,23 @@ fn verify_qr(app: AppHandle) {
                 }
                 qa_login.cancel(&app, platform);
             }
-            if report["imagePresent"]!=true {
-                if let Some(window)=app.get_webview_window(&format!("official-{}",platform.key())) {
-                    let (sender,receiver)=tokio::sync::oneshot::channel();let sender=Mutex::new(Some(sender));
+            if report["imagePresent"] != true {
+                if let Some(window) =
+                    app.get_webview_window(&format!("official-{}", platform.key()))
+                {
+                    let (sender, receiver) = tokio::sync::oneshot::channel();
+                    let sender = Mutex::new(Some(sender));
                     let _=window.eval_with_callback(r#"JSON.stringify({ready:document.readyState,path:location.pathname,requested:window.__snowdownQrRequested,loginButtons:[...document.querySelectorAll('button')].filter(e=>e.textContent.trim()==='登录').map(e=>({cls:e.className,visible:e.getBoundingClientRect().width>0,form:!!e.closest('form,.login-container,.login-modal')})),images:[...document.querySelectorAll('img')].filter(e=>e.src.startsWith('data:')).slice(0,12).map(e=>({cls:e.className,width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height}))})"#,move|value|{if let Some(sender)=sender.lock().unwrap().take(){let _=sender.send(value);}});
-                    if let Ok(Ok(raw))=tokio::time::timeout(Duration::from_secs(3),receiver).await {
-                        let value:serde_json::Value=serde_json::from_str(&raw).unwrap_or_default();
-                        report["dom"]=if let Some(text)=value.as_str(){serde_json::from_str(text).unwrap_or_default()}else{value};
+                    if let Ok(Ok(raw)) =
+                        tokio::time::timeout(Duration::from_secs(3), receiver).await
+                    {
+                        let value: serde_json::Value =
+                            serde_json::from_str(&raw).unwrap_or_default();
+                        report["dom"] = if let Some(text) = value.as_str() {
+                            serde_json::from_str(text).unwrap_or_default()
+                        } else {
+                            value
+                        };
                     }
                 }
             }

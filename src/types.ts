@@ -55,6 +55,9 @@ export interface DownloadTask {
   saveDanmaku: boolean
   saveSubtitles: boolean
   warning: string | null
+  batchId?: string | null
+  startIntervalSecs?: number
+  notBefore?: number
 }
 
 export interface AppSnapshot {
@@ -76,3 +79,13 @@ export interface CreateTaskRequest {
   quality: number
   format: OutputFormat
 }
+
+export interface BatchOptions {
+  downloadDir: string
+  intervalSecs: number
+  saveCover: boolean
+  saveDanmaku: boolean
+  saveSubtitles: boolean
+}
+export interface CreateBatchRequest { items: CreateTaskRequest[]; options: BatchOptions }
+export interface BatchResult { added: number; skipped: number }

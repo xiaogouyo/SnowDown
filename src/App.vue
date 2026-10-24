@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   ArrowDown, ArrowDownToLine, ArrowUpRight, Check, CheckCheck, ChevronDown, CircleAlert,
   CircleCheck, Clock3, ClipboardPaste, Download, ExternalLink, FileText, Film, FolderOpen,
@@ -8,9 +8,10 @@ import {
 } from '@lucide/vue'
 import * as api from './api'
 import UiSelect from './components/UiSelect.vue'
+import BatchDownload from './components/BatchDownload.vue'
 import { identifySource, platformLabels, sourceSummary } from './sources'
 import { bytes, duration, errorMessage, statusLabels } from './format'
-import type { AppSnapshot, DownloadTask, OutputFormat, Settings, VideoInfo, LoginQr, Platform, SourceLink } from './types'
+import type { AppSnapshot, BatchResult, DownloadTask, OutputFormat, Settings, VideoInfo, LoginQr, Platform, SourceLink } from './types'
 
 const snapshot = ref<AppSnapshot | null>(null)
 const view = ref<'active' | 'completed' | 'history'>('active')
@@ -23,6 +24,8 @@ const selectedPages = ref<number[]>([])
 const quality = ref(32)
 const format = ref<OutputFormat>('video')
 const dialog = ref<'settings' | 'about' | null>(null)
+const batchOpen = ref(false)
+const batchButton = ref<HTMLButtonElement>()
 const settingsTab = ref<'download' | 'account'>('download')
 const settingsDraft = reactive<Settings>({ downloadDir: '', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false })
 const accountPlatform = ref<Platform>('bilibili')
@@ -74,6 +77,15 @@ function notify(text: string, type: 'success' | 'error' | 'info' = 'info') {
 
 function setView(next: typeof view.value) { view.value = next; selectedTasks.value = []; filter.value = 'all'; query.value = '' }
 function focusLink() { setView('active'); linkInput.value?.focus() }
+function openBatch() {
+  if (!snapshot.value || analyzing.value || submitting.value || video.value || dialog.value) return
+  batchOpen.value = true
+}
+async function closeBatch() { batchOpen.value = false; await nextTick(); batchButton.value?.focus() }
+function batchQueued(result: BatchResult) {
+  setView('active')
+  notify(`已加入 ${result.added} 个下载任务${result.skipped ? `，跳过 ${result.skipped} 个已有任务` : ''}。`, result.added ? 'success' : 'info')
+}
 
 async function analyze() {
   if (analyzing.value) return
@@ -108,10 +120,11 @@ function onPaste(event: ClipboardEvent) {
 }
 
 async function checkClipboard() {
-  if (checkingClipboard || !api.desktop || !snapshot.value?.settings.clipboardEnabled || analyzing.value || submitting.value || video.value || dialog.value) return
+  if (checkingClipboard || !api.desktop || !snapshot.value?.settings.clipboardEnabled || analyzing.value || submitting.value || video.value || dialog.value || batchOpen.value) return
   checkingClipboard = true
   try {
     const source = await api.readClipboardLink()
+    if (batchOpen.value || dialog.value || video.value || analyzing.value || submitting.value) return
     if (!source || source.url === lastClipboard) return
     lastClipboard = source.url
     if (link.value.trim() && detectedSource.value?.url !== source.url) { clipboardSuggestion.value = source; return }
@@ -268,7 +281,8 @@ async function openFolder() {
 }
 
 function onKey(event: KeyboardEvent) {
-  if (event.ctrlKey && event.key.toLowerCase() === 'n') { event.preventDefault(); focusLink() }
+  if (batchOpen.value) return
+  if (event.ctrlKey && event.key.toLowerCase() === 'n') { event.preventDefault(); openBatch() }
   if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'v') { event.preventDefault(); void paste() }
   if (event.key === 'Escape' && !submitting.value) { video.value = null; dialog.value = null }
 }
@@ -335,7 +349,7 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); stopLo
       <main class="workspace">
         <section class="page-heading">
           <div><div class="eyebrow">YOUR CONTENT, YOUR SPACE</div><h1>{{ viewTitle }}<span class="title-dot">.</span></h1><p>{{ view === 'active' ? '留住每一次灵感，让喜欢的内容随时相伴。' : view === 'completed' ? '下载完成的内容，都在这里等你。' : '每一次收藏，都有迹可循。' }}</p></div>
-          <button class="button primary new-task" @click="focusLink"><Plus :size="17" />新建下载<kbd>Ctrl N</kbd></button>
+          <button ref="batchButton" class="button primary new-task" :disabled="analyzing || submitting || !snapshot" @click="openBatch"><Plus :size="17" />批量下载<kbd>Ctrl N</kbd></button>
         </section>
 
         <section class="link-card" aria-label="添加下载">
@@ -374,7 +388,7 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); stopLo
               </div>
               <h3>{{ query || filter !== 'all' ? '没有找到匹配的任务' : view === 'completed' ? '收藏正在路上' : view === 'history' ? '你的收藏故事，从这里开始' : '还没有下载任务' }}</h3>
               <p>{{ query || filter !== 'all' ? '试试其他关键词，或调整筛选条件。' : view === 'completed' ? '视频下载完成后，会自动出现在这里。' : '粘贴视频链接，把喜欢的内容留在本地。' }}</p>
-              <button v-if="!query && filter === 'all'" class="button empty-button" @click="focusLink"><Plus :size="15" />添加第一个下载</button>
+              <button v-if="!query && filter === 'all'" class="button empty-button" @click="openBatch"><Plus :size="15" />添加批量下载</button>
             </div>
 
             <div v-else class="task-list">
@@ -385,7 +399,7 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); stopLo
                   <div class="task-title-line"><h3 :title="task.title">{{ task.title }}</h3><span :class="['status-tag', task.status]">{{ statusLabels[task.status] }}</span></div>
                   <div class="task-meta"><span :class="['task-platform', task.platform]">{{ platformLabels[task.platform ?? 'bilibili'] }}</span><i></i><span v-if="task.format === 'audio'"><Music2 :size="11" />M4A</span><span v-else>MP4 · {{ task.qualityLabel }}</span><i></i><span class="page-title" :title="task.pageTitle">{{ task.platform === 'bilibili' || !task.platform ? `P${task.page} · ` : '' }}{{ task.pageTitle }}</span></div>
                   <div v-if="['downloading', 'merging', 'paused', 'queued'].includes(task.status)" class="progress-track"><div :class="{ paused: task.status === 'paused' }" :style="{ width: `${Math.min(task.progress, 100)}%` }"></div></div>
-                  <div class="task-detail"><span v-if="task.error" class="task-error" :title="task.error">{{ task.error }}</span><span v-else-if="task.warning" class="task-warning" :title="task.warning">{{ task.warning }}</span><span v-else-if="task.status === 'completed'">{{ bytes(task.totalBytes) }}<span class="detail-separator">·</span>已保存到下载目录</span><span v-else>{{ bytes(task.downloadedBytes) }}<template v-if="task.totalBytes"> / {{ bytes(task.totalBytes) }}</template></span><span v-if="task.status === 'downloading'" class="task-speed">{{ bytes(task.speed) }}/s<span class="detail-separator">·</span>{{ task.progress.toFixed(1) }}%</span><span v-else-if="task.status === 'merging'">正在生成完整文件…</span></div>
+                  <div class="task-detail"><span v-if="task.error" class="task-error" :title="task.error">{{ task.error }}</span><span v-else-if="task.warning" class="task-warning" :title="task.warning">{{ task.warning }}</span><span v-else-if="task.status === 'completed'">{{ bytes(task.totalBytes) }}<span class="detail-separator">·</span>已保存到下载目录</span><span v-else-if="task.status === 'queued' && task.startIntervalSecs">等待下载<span class="detail-separator">·</span>同批启动间隔 {{ task.startIntervalSecs }} 秒</span><span v-else>{{ bytes(task.downloadedBytes) }}<template v-if="task.totalBytes"> / {{ bytes(task.totalBytes) }}</template></span><span v-if="task.status === 'downloading'" class="task-speed">{{ bytes(task.speed) }}/s<span class="detail-separator">·</span>{{ task.progress.toFixed(1) }}%</span><span v-else-if="task.status === 'merging'">正在生成完整文件…</span></div>
                 </div>
                 <div class="task-actions">
                   <button v-if="['queued', 'downloading'].includes(task.status)" class="icon-button" title="暂停下载" @click="action(task, 'pause')"><Pause :size="17" /></button>
@@ -403,10 +417,12 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); stopLo
         <div class="workspace-note"><span class="note-icon"><ShieldCheck :size="16" /></span><div><strong>安心收藏，文件始终在你手中</strong><p>视频直接保存到本地。关闭窗口后，SnowDown 会在系统托盘继续下载。</p></div><span class="note-decoration"><Snowflake :size="33" :stroke-width="1" /></span></div>
       </main>
 
-      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="dialog = 'about'">v{{ snapshot?.version ?? '0.1.4' }}</button></div></footer>
+      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="dialog = 'about'">v{{ snapshot?.version ?? '0.1.5' }}</button></div></footer>
     </div>
 
     <Transition name="toast"><div v-if="toast" :class="['toast-message', toast.type]" role="status"><CircleAlert v-if="toast.type === 'error'" :size="18" /><CircleCheck v-else-if="toast.type === 'success'" :size="18" /><Info v-else :size="18" /><span>{{ toast.text }}</span><button aria-label="关闭提示" @click="toast = null"><X :size="15" /></button></div></Transition>
+
+    <BatchDownload v-if="batchOpen && snapshot" :settings="snapshot.settings" @close="closeBatch" @queued="batchQueued" />
 
     <div v-if="video" class="modal-overlay" @mousedown.self="!submitting && (video = null)">
       <section class="modal video-modal" role="dialog" aria-modal="true" aria-labelledby="video-dialog-title">
@@ -474,6 +490,6 @@ onUnmounted(() => { unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); stopLo
       </section>
     </div>
 
-    <div v-if="dialog === 'about'" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.4' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="dialog = null">开始收藏<ExternalLink :size="14" /></button></section></div>
+    <div v-if="dialog === 'about'" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.1.5' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="dialog = null">开始收藏<ExternalLink :size="14" /></button></section></div>
   </div>
 </template>

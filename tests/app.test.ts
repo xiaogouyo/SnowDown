@@ -5,14 +5,14 @@ import type { AppSnapshot, VideoInfo } from '../src/types'
 
 const api = vi.hoisted(() => ({
   desktop: true, getSnapshot: vi.fn(), subscribe: vi.fn(), inspectVideo: vi.fn(),
-  createTasks: vi.fn(), taskAction: vi.fn(), saveSettings: vi.fn(), beginLogin: vi.fn(), pollLogin: vi.fn(), cancelLogin: vi.fn(), logout: vi.fn(), checkLogin: vi.fn(), windowAction: vi.fn(), watchMaximized: vi.fn(),
+  createTasks: vi.fn(), createBatch: vi.fn(), taskAction: vi.fn(), saveSettings: vi.fn(), beginLogin: vi.fn(), pollLogin: vi.fn(), cancelLogin: vi.fn(), logout: vi.fn(), checkLogin: vi.fn(), windowAction: vi.fn(), watchMaximized: vi.fn(),
   chooseDirectory: vi.fn(), openDirectory: vi.fn(), readClipboardLink: vi.fn(), watchFocus: vi.fn(),
 }))
 vi.mock('../src/api', () => ({ ...api, __v_isRef: false }))
 
 const initial: AppSnapshot = {
   tasks: [], settings: { downloadDir: 'D:\\视频', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
-  siteSessions: [], mediaReady: true, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.4',
+  siteSessions: [], mediaReady: true, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.5',
 }
 const video: VideoInfo = {
   platform: 'bilibili', sourceUrl: 'https://www.bilibili.com/video/BV1xx411c7mD',
@@ -36,11 +36,26 @@ beforeEach(() => {
   api.subscribe.mockResolvedValue(() => {})
   api.inspectVideo.mockResolvedValue(video)
   api.createTasks.mockResolvedValue(undefined)
+  api.createBatch.mockResolvedValue({ added: 2, skipped: 0 })
   wrapper = mount(App)
 })
 afterEach(() => { wrapper?.unmount(); vi.useRealTimers() })
 
 describe('desktop download flow', () => {
+  it('opens batch download with the top button and Ctrl+N while retaining single-link parsing', async () => {
+    await flushPromises()
+    expect(wrapper.get('.new-task').text()).toContain('批量下载')
+    await wrapper.get('.new-task').trigger('click')
+    expect(wrapper.find('[aria-label="批量视频链接"]').exists()).toBe(true)
+    await wrapper.get('[aria-label="关闭批量下载"]').trigger('click')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ctrlKey: true }))
+    await flushPromises()
+    expect(wrapper.find('.batch-modal').exists()).toBe(true)
+    await wrapper.get('[aria-label="关闭批量下载"]').trigger('click')
+    await wrapper.get('input[aria-label="视频链接"]').setValue('BV1xx411c7mD')
+    await wrapper.get('.link-form').trigger('submit'); await flushPromises()
+    expect(wrapper.find('.video-modal').exists()).toBe(true)
+  })
   it.each(['bilibili', 'douyin', 'xiaohongshu'] as const)('automatically refreshes %s on official expiration and stops after close', async platform => {
     await flushPromises(); vi.useFakeTimers()
     api.beginLogin.mockResolvedValue({id:'fresh-qr',image:'data:image/png;base64,iVBORw0KGgo=',expiresAt:Date.now()+120000})

@@ -1,4 +1,7 @@
 mod auth;
+mod batch;
+#[cfg(debug_assertions)]
+mod batch_probe;
 mod bilibili;
 mod clipboard;
 #[cfg(debug_assertions)]
@@ -13,7 +16,7 @@ mod web_capture;
 
 use model::*;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -109,108 +112,35 @@ fn create_tasks(
     state: State<'_, Arc<AppState>>,
     request: CreateTaskRequest,
 ) -> Result<(), String> {
-    if state.ffmpeg.is_none() {
-        return Err("未找到 FFmpeg，暂时不能开始下载。请安装完整客户端。".into());
-    }
-    if request.video.platform == Platform::Bilibili {
-        bilibili::normalize_input(&request.video.bvid)?;
-    } else {
-        let source = sites::recognize(&request.video.source_url)?;
-        if source.platform != request.video.platform {
-            return Err("视频与来源平台不一致。".into());
-        }
-        if sites::video_id(&source)? != request.video.bvid {
-            return Err("视频标识与来源不一致。".into());
-        }
-    }
-    if !request
-        .video
-        .qualities
-        .iter()
-        .any(|q| q.id == request.quality)
-    {
-        return Err("请选择视频可用的画质。".into());
-    }
-    if request.page_cids.is_empty() {
-        return Err("请至少选择一个分P。".into());
-    }
     let settings = state.settings.lock().unwrap().clone();
-    std::fs::create_dir_all(&settings.download_dir).map_err(|e| format!("下载目录不可用：{e}"))?;
-    let mut tasks = state.tasks.lock().unwrap();
-    let mut added = 0;
-    let unique: HashSet<u64> = request.page_cids.into_iter().collect();
-    if unique
-        .iter()
-        .any(|cid| !request.video.pages.iter().any(|page| page.cid == *cid))
-    {
-        return Err("分P不属于当前视频".into());
-    }
-    for page in request
-        .video
-        .pages
-        .iter()
-        .filter(|page| unique.contains(&page.cid))
-    {
-        let cid = page.cid;
-        if tasks.iter().any(|t| {
-            t.platform == request.video.platform
-                && t.bvid == request.video.bvid
-                && t.cid == cid
-                && t.format == request.format
-                && t.quality == request.quality
-                && matches!(
-                    t.status,
-                    TaskStatus::Queued
-                        | TaskStatus::Downloading
-                        | TaskStatus::Merging
-                        | TaskStatus::Paused
-                )
-        }) {
-            continue;
-        }
-        let task = DownloadTask {
-            platform: request.video.platform,
-            source_url: request.video.source_url.clone(),
-            id: uuid::Uuid::new_v4().to_string(),
-            bvid: request.video.bvid.clone(),
-            cid,
-            title: request.video.title.clone(),
-            page_title: page.part.clone(),
-            page: page.page,
-            cover: request.video.cover.clone(),
-            quality: request.quality,
-            quality_label: request
-                .video
-                .qualities
-                .iter()
-                .find(|q| q.id == request.quality)
-                .map(|q| q.label.clone())
-                .unwrap_or_else(|| "原始画质".into()),
-            format: request.format.clone(),
-            status: TaskStatus::Queued,
-            progress: 0.0,
-            downloaded_bytes: 0,
-            total_bytes: 0,
-            speed: 0,
-            error: None,
-            output_path: None,
-            created_at: now_ms() + added,
-            download_dir: settings.download_dir.clone(),
+    let result = batch::enqueue(
+        &state,
+        vec![request],
+        BatchOptions {
+            download_dir: settings.download_dir,
+            interval_secs: 0,
             save_cover: settings.save_cover,
-            save_danmaku: request.video.platform == Platform::Bilibili && settings.save_danmaku,
-            save_subtitles: request.video.platform == Platform::Bilibili && settings.save_subtitles,
-            warning: None,
-        };
-        state.storage.save_task(&task)?;
-        tasks.push(task);
-        added += 1;
-    }
-    drop(tasks);
+            save_danmaku: settings.save_danmaku,
+            save_subtitles: settings.save_subtitles,
+        },
+        false,
+    )?;
     state.emit(&app);
-    if added == 0 {
+    if result.added == 0 {
         return Err("所选分P已有相同的下载任务。".into());
     }
     Ok(())
+}
+
+#[tauri::command]
+fn create_batch_tasks(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    request: CreateBatchRequest,
+) -> Result<BatchResult, String> {
+    let result = batch::enqueue(&state, request.items, request.options, true)?;
+    state.emit(&app);
+    Ok(result)
 }
 
 #[tauri::command]
@@ -425,6 +355,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             let data_dir = if std::env::var_os("SNOWDOWN_QR_VERIFY").is_some() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/qr-qa-app-data")
+            } else if std::env::var_os("SNOWDOWN_BATCH_VERIFY").is_some() {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/batch-qa-app-data")
             } else {
                 data_dir
             };
@@ -461,7 +393,11 @@ pub fn run() {
             });
             app.manage(state.clone());
             #[cfg(debug_assertions)]
-            debug_probe::start(handle.clone());
+            if std::env::var_os("SNOWDOWN_BATCH_VERIFY").is_some() {
+                batch_probe::start(handle.clone());
+            } else {
+                debug_probe::start(handle.clone());
+            }
             let show = MenuItem::with_id(app, "show", "打开 SnowDown", true, None::<&str>)?;
             let folder = MenuItem::with_id(app, "folder", "打开下载目录", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出 SnowDown", true, None::<&str>)?;
@@ -514,6 +450,7 @@ pub fn run() {
             get_snapshot,
             inspect_video,
             create_tasks,
+            create_batch_tasks,
             task_action,
             save_settings,
             begin_login,

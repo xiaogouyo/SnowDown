@@ -2,11 +2,11 @@
 
 Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红书视频。采用 Tauri 2、Vue 3、TypeScript 与 Rust，下载文件在本机处理和保存。
 
-## 下载 v0.1.4
+## 下载 v0.1.5
 
-- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.4/SnowDown_0.1.4_x64-setup.exe)
-- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.4/SnowDown_0.1.4_Windows_x64_portable.zip)
-- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.1.4)
+- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.5/SnowDown_0.1.5_x64-setup.exe)
+- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.1.5/SnowDown_0.1.5_Windows_x64_portable.zip)
+- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.1.5)
 
 需要 Windows 10/11 x64 和 WebView2 运行时。免安装版请完整解压后启动，保留 `resources` 文件夹。下载文件的 SHA256 校验值随 Release 提供。
 
@@ -16,6 +16,8 @@ Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红�
 - 抖音视频页、精选页 modal_id、分享短链接；小红书视频笔记与分享短链接。可粘贴完整分享文字，自动识别平台并保留必要的访问参数。
 - 原生剪贴板识别：回到软件时提示，点击“粘贴并解析”或 Ctrl+Shift+V 快速解析。可在设置关闭识别，或开启识别后自动解析；不会自动创建下载任务。
 - 多P选择、当前账号可用画质选择、批量任务。
+- “批量下载”或 Ctrl+N 打开多链接弹窗，支持三平台混合链接、完整分享文字，按换行、空格或逗号分隔并自动去重，每批最多 100 个链接 / 1000 个分P任务。
+- 批量统一设置 MP4/M4A、画质上限、保存目录、封面/弹幕/字幕、全部分P及 0 至 3600 秒的同批任务启动间隔；设置仅用于本批。解析失败的链接保留重试，成功项一键入队，已有活跃任务自动跳过。
 - MP4 视频与 M4A 音频，FFmpeg 自动处理。
 - 下载队列、1至4任务并发、单任务限速、暂停/继续、失败重试。
 - SQLite 保存设置与任务；退出后再次打开，可手动继续中断任务。
@@ -34,6 +36,8 @@ Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红�
 安装 `release/` 中的 Windows 安装程序，启动 SnowDown，粘贴视频链接并点击“解析视频”，选择分P与格式后下载。
 
 也可解压免安装压缩包，双击文件夹中的 `SnowDown.exe`；请保留旁边的 `resources` 文件夹。
+
+批量下载：点击右上角“批量下载”（Ctrl+N），粘贴多个视频链接或分享文字，统一设置后点击“一键下载”。成功项会加入队列，失败项保留在弹窗中。画质上限优先选择实际可用的较低画质，无较低档时选最低可用画质；竖屏按短边分辨率比较。默认只下载链接指定的分P，可勾选下载全部分P。间隔从同批上一个任务实际启动时计算，并遵守全局并发数；0 秒表示不额外等待。间隔随任务保存，重启后仍需手动继续中断任务。
 
 默认目录为系统 Downloads 下的 `SnowDown`。关闭主窗口会隐藏到系统托盘，下载继续；完全退出请使用托盘菜单。临时下载保存在所选目录的 `.snowdown/<任务ID>` 中，成功后清理该任务的临时文件。移除任务记录不会删除下载文件。
 

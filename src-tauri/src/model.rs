@@ -142,6 +142,12 @@ pub struct DownloadTask {
     pub save_danmaku: bool,
     pub save_subtitles: bool,
     pub warning: Option<String>,
+    #[serde(default)]
+    pub batch_id: Option<String>,
+    #[serde(default)]
+    pub start_interval_secs: u32,
+    #[serde(default)]
+    pub not_before: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -163,6 +169,30 @@ pub struct CreateTaskRequest {
     pub page_cids: Vec<u64>,
     pub quality: u32,
     pub format: OutputFormat,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchOptions {
+    pub download_dir: String,
+    pub interval_secs: u32,
+    pub save_cover: bool,
+    pub save_danmaku: bool,
+    pub save_subtitles: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateBatchRequest {
+    pub items: Vec<CreateTaskRequest>,
+    pub options: BatchOptions,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchResult {
+    pub added: usize,
+    pub skipped: usize,
 }
 
 pub fn safe_filename(input: &str) -> String {

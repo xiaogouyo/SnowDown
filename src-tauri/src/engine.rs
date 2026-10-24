@@ -18,7 +18,7 @@ pub fn start_scheduler(app: AppHandle, state: Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
         loop {
             let limit = state.settings.lock().unwrap().concurrency;
-            let queued: Vec<_> = state
+            let mut queued: Vec<_> = state
                 .tasks
                 .lock()
                 .unwrap()
@@ -26,8 +26,12 @@ pub fn start_scheduler(app: AppHandle, state: Arc<AppState>) {
                 .filter(|t| t.status == TaskStatus::Queued)
                 .cloned()
                 .collect();
+            queued.sort_by_key(|task| task.created_at);
             for task in queued {
+                // Use the same tasks -> active lock order as pause/cancel/remove. Reserve the
+                // status and persisted sibling deadlines before another task can be selected.
                 let cancel = {
+                    let mut tasks = state.tasks.lock().unwrap();
                     let mut active = state.active.lock().unwrap();
                     if active.len() >= limit {
                         break;
@@ -35,20 +39,27 @@ pub fn start_scheduler(app: AppHandle, state: Arc<AppState>) {
                     if active.contains_key(&task.id) {
                         continue;
                     }
+                    let Some(updates) = crate::batch::start_updates(&tasks, &task.id, now_ms())
+                    else {
+                        continue;
+                    };
+                    if state.storage.save_tasks(&updates).is_err() {
+                        continue;
+                    }
+                    for update in updates {
+                        if let Some(current) = tasks.iter_mut().find(|t| t.id == update.id) {
+                            *current = update;
+                        }
+                    }
                     let cancel = Arc::new(AtomicBool::new(false));
                     active.insert(task.id.clone(), cancel.clone());
                     cancel
                 };
+                state.emit(&app);
                 let job_state = state.clone();
                 let job_app = app.clone();
                 tauri::async_runtime::spawn(async move {
                     let id = task.id.clone();
-                    let _ = job_state.patch_task(&job_app, &id, |t| {
-                        if t.status == TaskStatus::Queued && !cancel.load(Ordering::Relaxed) {
-                            t.status = TaskStatus::Downloading;
-                            t.error = None;
-                        }
-                    });
                     let mut result = Err("下载没有启动".into());
                     for attempt in 0..3 {
                         if cancel.load(Ordering::Relaxed) {

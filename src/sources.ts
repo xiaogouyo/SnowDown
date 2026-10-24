@@ -6,7 +6,7 @@ const matches = (host: string, base: string) => host === base || host.endsWith(`
 export function identifySource(text: string): SourceLink | null {
   const bare = text.trim()
   if (/^(BV[A-Za-z0-9]{10}|av\d+)$/i.test(bare)) return { platform: 'bilibili', url: `https://www.bilibili.com/video/${bare}` }
-  for (const raw of text.match(/https?:\/\/[^\s<>"'“”，。！？（）【】()[\]{}]+/gi) ?? []) {
+  for (const raw of text.match(/https?:\/\/[^\s<>"'“”，,；;。！？（）【】()[\]{}]+/gi) ?? []) {
     try {
       const url = new URL(raw.replace(/[.,;]+$/, ''))
       if (url.username || url.password || url.port) continue
@@ -35,6 +35,25 @@ export function identifySource(text: string): SourceLink | null {
     } catch { /* Ignore text that is not a supported URL. */ }
   }
   return null
+}
+
+/** Multiple share messages, URL lists and bare Bili IDs; never split an access query on '&'. */
+export function identifySources(text: string): { sources: SourceLink[]; duplicates: number; unsupported: number } {
+  const tokens = text.match(/https?:\/\/[^\s<>"'“”，,；;。！？（）【】()[\]{}]+|\bBV[A-Za-z0-9]{10}\b|\bav\d+\b/gi) ?? []
+  const unique = new Map<string, SourceLink>()
+  let duplicates = 0, unsupported = 0
+  for (const token of tokens) {
+    const source = identifySource(token)
+    if (!source) { unsupported++; continue }
+    const key = source.platform === 'xiaohongshu' ? sourceSummary(source) : source.url
+    const previous = unique.get(key)
+    if (previous) {
+      duplicates++
+      // A later complete share URL may carry the access token missing from the first one.
+      if (source.platform === 'xiaohongshu' && !new URL(previous.url).searchParams.has('xsec_token')) unique.set(key, source)
+    } else unique.set(key, source)
+  }
+  return { sources: [...unique.values()], duplicates, unsupported }
 }
 
 export function sourceSummary(source: SourceLink): string {
