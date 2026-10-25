@@ -4,6 +4,8 @@ Windows 桌面视频下载工具，支持B站、抖音、小红书，并接入�
 
 ## 下载 v0.2.10
 
+**插件 v0.1.8：**[下载插件 ZIP](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.8/SnowDown_BrowserExtension_0.1.8.zip)。其他平台卡片保持右上角，修正抖音完整播放器侧栏对齐；增加 YouTube 观看页及已播放媒体读取、超时和受限资源提示。[修复说明与限制](docs/releases/extension-v0.1.8.md)
+
 **插件错误修复 v0.1.7：**[下载独立插件 ZIP](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.7/SnowDown_BrowserExtension_0.1.7.zip)。修复网页 Logo 加载被拒绝和失效旧脚本继续运行，保持原 Logo 与入口布局。更新后刷新扩展，再刷新已有网页；错误列表中的旧记录需单独清除。[说明](docs/releases/extension-v0.1.7.md)
 
 
@@ -12,7 +14,7 @@ Windows 桌面视频下载工具，支持B站、抖音、小红书，并接入�
 
 - [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.10/SnowDown_0.2.10_x64-setup.exe)
 - [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.10/SnowDown_0.2.10_Windows_x64_portable.zip)
-- [浏览器插件 v0.1.7](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.7/SnowDown_BrowserExtension_0.1.7.zip)
+- [浏览器插件 v0.1.8](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.8/SnowDown_BrowserExtension_0.1.8.zip)
 - [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.10)
 
 需要 Windows 10/11 x64 和 WebView2 运行时。免安装版请完整解压后启动，保留 `resources` 文件夹。下载文件的 SHA256 校验值随 Release 提供。

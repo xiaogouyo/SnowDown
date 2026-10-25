@@ -4,6 +4,7 @@ import {genericVideo,downloadRows} from './media.js';
 import {expandManifests} from './manifests.js';
 import {siteOf,previewUrl} from './catalog.js';
 import {douyinPreviewTargets} from './douyin-preview.js';
+import {youtubeId,youtubeMedia,observedYoutubeMedia} from './youtube.js';
 import {parseVideo} from './sites.js';
 import {platformOf,platformNames,sessionPlatforms,normalizeResources,safeUrl,safeName,repository,resourceKind} from './core.js';
 import {contentSender,currentTicket,supportedVideoUrl} from './floating-core.js';
@@ -11,9 +12,9 @@ const browser=/Edg\//.test(navigator.userAgent)?'edge':'chrome';
 let port,sequence=0,connected=false,version='',binding='',lastSession='',syncTimer;
 const pending=new Map(),network=new Map(),floatTickets=new Map();
 const prefs=async()=>({preferDesktop:false,syncAccounts:true,floatingEnabled:true,...await chrome.storage.local.get(['preferDesktop','syncAccounts','lastBinding','floatingEnabled'])});
-async function call(method,data={}){
+async function call(method,data={},deadline){
  if(!port){try{port=chrome.runtime.connectNative('app.snowdown.bridge');port.onMessage.addListener(value=>{const waiter=pending.get(value.id);if(waiter){pending.delete(value.id);clearTimeout(waiter.timer);waiter.resolve(value)}});port.onDisconnect.addListener(()=>{void chrome.runtime.lastError;port=null;connected=false;for(const waiter of pending.values()){clearTimeout(waiter.timer);waiter.resolve({connected:false})}pending.clear()})}catch{return {connected:false}}}
- return new Promise(resolve=>{const id=++sequence;pending.set(id,{resolve,timer:setTimeout(()=>{pending.delete(id);resolve({connected:false,error:'桌面连接超时，请稍后重试。'})},method==='hello'?2500:method==='inspect'||method==='queue'?65000:45000)});try{port.postMessage({id,browser,method,...data})}catch{const item=pending.get(id);clearTimeout(item?.timer);pending.delete(id);resolve({connected:false})}});
+ return new Promise(resolve=>{const id=++sequence;pending.set(id,{resolve,timer:setTimeout(()=>{pending.delete(id);resolve({connected:false,error:'解析超时，请在浏览器打开目标视频并播放后重试。'})},deadline||(method==='hello'?2500:method==='inspect'||method==='queue'?65000:45000))});try{port.postMessage({id,browser,method,...data})}catch{const item=pending.get(id);clearTimeout(item?.timer);pending.delete(id);resolve({connected:false})}});
 }
 let heartbeatPending,lastHeartbeat=0;
 async function heartbeat(force=false){if(heartbeatPending)return heartbeatPending;if(!force&&Date.now()-lastHeartbeat<1000)return {connected,version,binding,effectiveDesktop:connected&&(await prefs()).preferDesktop};
@@ -24,14 +25,19 @@ async function checkHeartbeat(){const result=await call('hello',{extensionVersio
  await chrome.action.setBadgeText({text:connected?'✓':''});await chrome.action.setBadgeBackgroundColor({color:'#3478ee'});
  return {connected,version,binding,effectiveDesktop:connected&&(await prefs()).preferDesktop};}
 async function pageFor(tabId,resources=false,targetUrl=null){const results=await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:capturePage,args:[{resources,backgrounds:resources,targetUrl}]});const page=results[0]?.result;if(!page)throw Error('当前页面无法读取。');return {...page,platform:page.platform||platformOf(page.url),site:siteOf(page.url),resources:resources?normalizeResources([...page.resources,...(network.get(tabId)||[])]):[]}}
-async function resolvePage(tabId,targetUrl=null,preview=null){
+const resolving=new Map();
+async function resolvePage(tabId,targetUrl=null,preview=null){const tab=await chrome.tabs.get(tabId),key=`${tabId}:${targetUrl||tab.url}`;if(resolving.has(key))return resolving.get(key);const promise=resolvePageWork(tabId,targetUrl,preview).finally(()=>resolving.delete(key));resolving.set(key,promise);return promise;}
+async function resolvePageWork(tabId,targetUrl=null,preview=null){
  let page=await pageFor(tabId,false,targetUrl);if(preview){page.title=preview.title||page.title;page.cover=preview.cover||page.cover;}
  if(page.platform!=='web'&&page.platform){try{return {page,video:await parseVideo(page)}}catch(original){const state=await heartbeat();if(state.connected){const result=await call('inspect',{url:page.url});if(result.data?.streams?.length)return {page,video:result.data};}throw original;}}
- if(!preview&&page.singleVisibleVideo&&!page.media?.length){page.media=(network.get(tabId)||[]).filter(r=>['video','manifest'].includes(r.kind)&&!/[.](?:m4s|mpd)(?:$|\?)/.test(r.url)).slice(-8);}
+ const youtube=page.site?.id==='youtube',videoId=youtubeId(page.url);
+ if(youtube){page.media=(page.media||[]).filter(item=>{try{return /(^|\.)googlevideo\.com$/.test(new URL(item.url).hostname)}catch{return false}});if(!page.media.length)page.media=observedYoutubeMedia(network.get(tabId)||[],videoId);}
+ if(!youtube&&!preview&&page.singleVisibleVideo&&!page.media?.length){page.media=(network.get(tabId)||[]).filter(r=>['video','manifest'].includes(r.kind)&&!/[.](?:m4s|mpd)(?:$|\?)/.test(r.url)).slice(-8);}
  page.media=await expandManifests(page.media||[]);let video=genericVideo(page);
- if(!video&&targetUrl){try{const result=(await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:linkedPageMedia,args:[targetUrl]}))[0]?.result;if(result){page={...page,...result};video=genericVideo(page);}}catch{}}
+ if(!video&&(targetUrl||youtube)){try{const result=(await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:linkedPageMedia,args:[targetUrl||page.url]}))[0]?.result;if(result){page={...page,...result};if(youtube)page.media=youtubeMedia(result.youtubeResponse,videoId);video=genericVideo(page);}}catch{}}
  if(video){page.detail=video.detail;return {page,video};}
- const state=await heartbeat();if(state.connected&&page.platform==='web'){const result=await call('inspect',{url:page.url});if(result.error)throw Error(result.error);if(result.data?.streams?.length)return {page,video:result.data};}
+ const state=await heartbeat();if(state.connected&&page.platform==='web'){const result=await call('inspect',{url:page.url},youtube?22000:45000);if(result.error)throw Error(youtube?`YouTube：${result.error} 若提示登录或验证，请在浏览器打开并播放目标视频后重新读取。`:result.error);if(result.data?.streams?.length)return {page,video:result.data};}
+ if(youtube)throw Error('此 YouTube 视频尚未提供可直接下载的资源。请打开并播放目标视频后重试；签名资源可启动 SnowDown 桌面解析，登录验证需在官方页面完成。');
  throw Error(page.platform==='web'?'此页面暂未提供直接视频资源。可连接 SnowDown 桌面端解析，或播放目标视频后重试。':'请打开一个视频页面，或切换到网页资源模式。');
 }
 async function syncSessions(){if(!connected||!(await prefs()).syncAccounts)return;const sessions=[];
@@ -49,7 +55,7 @@ async function syncSessions(){if(!connected||!(await prefs()).syncAccounts)retur
 chrome.cookies.onChanged.addListener(change=>{if(!['bilibili.com','douyin.com','xiaohongshu.com'].some(domain=>change.cookie.domain.replace(/^\./,'').endsWith(domain)))return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>void syncSessions(),1500)});
 chrome.tabs.onRemoved.addListener(id=>{network.delete(id);for(const [key,value]of floatTickets)if(value.tabId===id)floatTickets.delete(key)});
 chrome.tabs.onUpdated.addListener((id,change)=>{if(change.status==='loading'){network.delete(id);for(const [key,value]of floatTickets)if(value.tabId===id)floatTickets.delete(key)}});
-chrome.webRequest.onHeadersReceived.addListener(details=>{if(details.tabId<0)return;const mime=details.responseHeaders?.find(h=>h.name.toLowerCase()==='content-type')?.value||'';const kind=resourceKind(details.url,mime);if(!kind)return;const list=network.get(details.tabId)||[];list.push({url:details.url,mime,kind,size:Number(details.responseHeaders?.find(h=>h.name.toLowerCase()==='content-length')?.value)||0});network.set(details.tabId,list.slice(-1000))},{urls:['http://*/*','https://*/*']},['responseHeaders']);
+chrome.webRequest.onHeadersReceived.addListener(details=>{if(details.tabId<0)return;const mime=details.responseHeaders?.find(h=>h.name.toLowerCase()==='content-type')?.value||'';const kind=resourceKind(details.url,mime);if(!kind)return;const item={url:details.url,mime,kind,size:Number(details.responseHeaders?.find(h=>h.name.toLowerCase()==='content-length')?.value)||0};const list=network.get(details.tabId)||[];list.push(item);network.set(details.tabId,list.slice(-1000));if(/(^|\.)googlevideo\.com$/.test(new URL(details.url).hostname))void chrome.tabs.get(details.tabId).then(tab=>{item.youtubeId=youtubeId(tab.url)}).catch(()=>{})},{urls:['http://*/*','https://*/*']},['responseHeaders']);
 async function refererRules(){await chrome.declarativeNetRequest.updateDynamicRules({removeRuleIds:[1,2,3],addRules:[['bilibili.com',['bilivideo.com','bilivideo.cn']],['douyin.com',['douyinvod.com','douyin.com']],['xiaohongshu.com',['xhscdn.com','xiaohongshu.com']]].map(([host,domains],index)=>({id:index+1,priority:1,action:{type:'modifyHeaders',requestHeaders:[{header:'Referer',operation:'set',value:`https://www.${host}/`}]},condition:{initiatorDomains:[chrome.runtime.id],requestDomains:domains}}))})}
 async function download(message){
  if(message.stream?.native&&message.browserOnly)throw Error('此画质需要桌面端解析，不能改用浏览器直接下载。');
