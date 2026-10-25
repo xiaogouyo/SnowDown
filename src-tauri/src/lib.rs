@@ -12,6 +12,7 @@ mod clipboard_watch;
 mod debug_probe;
 mod engine;
 mod extension_package;
+mod extension_update;
 #[cfg(all(debug_assertions, windows))]
 mod extension_package_probe;
 mod extractor_proxy;
@@ -191,6 +192,12 @@ fn dismiss_update_notice(app: AppHandle) {
 fn browser_status(state: State<'_, Arc<AppState>>) -> Vec<browser_bridge::BrowserStatus> {
     browser_bridge::snapshot(&state)
 }
+#[tauri::command]
+async fn check_browser_extension_update()->Result<extension_update::Release,String>{extension_update::check().await}
+#[tauri::command]
+async fn download_browser_extension_update(path:String,version:String)->Result<String,String>{extension_update::download(&path,&version).await}
+#[tauri::command]
+fn open_browser_extension_release(app:AppHandle,url:String)->Result<(),String>{use tauri_plugin_opener::OpenerExt;if !extension_update::release_url(&url){return Err("插件发布页面无效。".into())}app.opener().open_url(url,None::<&str>).map_err(|_|"无法打开插件发布页面。".into())}
 #[tauri::command]
 fn install_browser_extension(app: AppHandle, browser: String) -> Result<String, String> {
     browser_bridge::install(&app, &browser)
@@ -868,6 +875,9 @@ pub fn run() {
             install_update,
             dismiss_update_notice,
             browser_status,
+            check_browser_extension_update,
+            download_browser_extension_update,
+            open_browser_extension_release,
             install_browser_extension,
             export_browser_extension_zip,
             open_update_release,

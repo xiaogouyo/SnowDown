@@ -20,7 +20,7 @@ impl Drop for Guard {
     }
 }
 
-fn upstream() -> Option<url::Url> {
+pub(crate) fn upstream() -> Option<url::Url> {
     for key in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] {
         if let Ok(value) = std::env::var(key) {
             if let Ok(url) = url::Url::parse(&value) {

@@ -2,9 +2,9 @@
 
 Windows 桌面视频下载工具，支持B站、抖音、小红书，并接入更多站点的通用解析与浏览器媒体读取。采用 Tauri 2、Vue 3、TypeScript 与 Rust，下载文件在本机处理和保存。
 
-## 下载 v0.2.10
+## 下载 v0.2.11
 
-**插件 v0.1.9：**[下载统一左上角入口版](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.9/SnowDown_BrowserExtension_0.1.9.zip)。所有平台的封面与播放器下载图标统一左上角，菜单从左侧展开；桌面保持 v0.2.10。[说明](docs/releases/extension-v0.1.9.md)
+**插件 v0.1.9：**[下载统一左上角入口版](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.9/SnowDown_BrowserExtension_0.1.9.zip)。所有平台的封面与播放器下载图标统一左上角，菜单从左侧展开，桌面内置同版本。[说明](docs/releases/extension-v0.1.9.md)
 
 **插件 v0.1.8：**[下载插件 ZIP](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.8/SnowDown_BrowserExtension_0.1.8.zip)。其他平台卡片保持右上角，修正抖音完整播放器侧栏对齐；增加 YouTube 观看页及已播放媒体读取、超时和受限资源提示。[修复说明与限制](docs/releases/extension-v0.1.8.md)
 
@@ -12,12 +12,12 @@ Windows 桌面视频下载工具，支持B站、抖音、小红书，并接入�
 
 
 
-内置插件 v0.1.6 本次修订，原 Logo 保持不变。新增实际插件版本检测，移除独立悬浮球，B站入口放在封面左上角，抖音播放器入口移至右侧操作栏上方，图标内外居中。桌面和插件共用 50 类站点目录。新增平台的实际可用范围和验证结果见[平台说明](docs/platform-support.md)。覆盖安装保留登录、设置、任务与下载内容。
+在“连接你的浏览器”面板检查 GitHub 最新插件正式版，比较已连接版本，查看更新说明并下载经过 SHA256 校验的 ZIP。内置插件 v0.1.9，所有平台入口统一左上角，原 Logo 保持不变。桌面和插件共用 50 类站点目录。新增平台的实际可用范围和验证结果见[平台说明](docs/platform-support.md)。覆盖安装保留登录、设置、任务与下载内容。
 
-- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.10/SnowDown_0.2.10_x64-setup.exe)
-- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.10/SnowDown_0.2.10_Windows_x64_portable.zip)
+- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.11/SnowDown_0.2.11_x64-setup.exe)
+- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.11/SnowDown_0.2.11_Windows_x64_portable.zip)
 - [浏览器插件 v0.1.9](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.9/SnowDown_BrowserExtension_0.1.9.zip)
-- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.10)
+- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.11)
 
 需要 Windows 10/11 x64 和 WebView2 运行时。免安装版请完整解压后启动，保留 `resources` 文件夹。下载文件的 SHA256 校验值随 Release 提供。
 

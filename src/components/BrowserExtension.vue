@@ -1,11 +1,18 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ArrowDownToLine, ArrowUpRight, Check, ChevronRight, CircleCheck, FileArchive, FolderInput, FolderOpen, Pin, Puzzle, ToggleRight, X } from '@lucide/vue'
 import * as api from '../api'
 import { errorMessage } from '../format'
 const emit = defineEmits<{ visibility: [visible: boolean] }>()
 const browsers = ref<api.BrowserStatus[]>([])
 const visible = ref(false), busy = ref(false), exporting = ref(false), error = ref(''), savedZip = ref('')
+const checking=ref(false),downloading=ref(false),latest=ref<api.ExtensionRelease|null>(null),updateError=ref(''),updateSaved=ref('')
+function compare(a:string|undefined,b:string|undefined){if(!a||!b||!/^\d+\.\d+\.\d+$/.test(a)||!/^\d+\.\d+\.\d+$/.test(b))return null;const x=a.split('.').map(Number),y=b.split('.').map(Number);for(let i=0;i<3;i++)if(x[i]!==y[i])return x[i]!<y[i]!?-1:1;return 0}
+const updateHint=computed(()=>{if(!latest.value)return '';const connected=browsers.value.filter(b=>b.connected);if(!connected.length||connected.some(b=>compare(b.extensionVersion,latest.value!.version)===null))return '已获取 GitHub 最新版本，连接插件后可比较正在运行的版本。';return connected.some(b=>compare(b.extensionVersion,latest.value!.version)===-1)?'发现新版插件，下载后覆盖原插件目录并刷新扩展与网页。':'已连接的插件已是最新版本。'})
+const remoteNewer=computed(()=>!!latest.value&&compare(browsers.value[0]?.bundledVersion,latest.value.version)===-1)
+async function checkUpdates(){if(checking.value)return;checking.value=true;latest.value=null;updateError.value='';updateSaved.value='';try{const value=await api.checkBrowserExtensionUpdate();if(!disposed)latest.value=value;await refresh()}catch(e){if(!disposed)updateError.value=errorMessage(e)}finally{checking.value=false}}
+async function downloadLatest(){if(!latest.value||downloading.value)return;downloading.value=true;updateError.value='';try{const path=await api.saveBrowserExtensionUpdate(latest.value);if(path&&!disposed)updateSaved.value=path}catch(e){if(!disposed)updateError.value=errorMessage(e)}finally{downloading.value=false}}
+async function openRelease(){if(!latest.value)return;try{await api.openBrowserExtensionRelease(latest.value.url)}catch(e){updateError.value=errorMessage(e)}}
 const steps = [
   { icon: FileArchive, hint: '下载插件 ZIP 到本机' },
   { icon: FolderOpen, hint: '解压 ZIP，保留完整插件文件夹' },
@@ -18,6 +25,7 @@ async function refresh() { if (!api.desktop) return; try { const value = await a
 function open() { visible.value = true; emit('visibility', true); void refresh() }
 function close() { visible.value = false; emit('visibility', false) }
 async function install(id: string) {
+  if(remoteNewer.value&&browsers.value.find(b=>b.id===id)?.installed){await downloadLatest();return}
   busy.value = true; error.value = ''
   try { await api.installBrowserExtension(id) } catch (e) { error.value = errorMessage(e) }
   finally { busy.value = false; await refresh() }
@@ -40,11 +48,15 @@ onUnmounted(() => { disposed = true; clearInterval(timer) })
       <section class="modal extension-modal" role="dialog" aria-modal="true" aria-labelledby="extension-title">
         <div class="modal-header"><div><span class="eyebrow">SNOWDOWN FOR YOUR BROWSER</span><h2 id="extension-title">连接你的浏览器</h2></div><button class="icon-button" aria-label="关闭插件设置" @click="close"><X :size="19" /></button></div>
         <div class="extension-body">
-          <p class="extension-intro">视频、图像一处收藏。内置插件 v{{ browsers[0]?.bundledVersion || '0.1.6' }}，可独立使用或连接桌面端。</p>
-          <button class="text-button" :disabled="busy" @click="refresh">检查插件版本</button>
+          <p class="extension-intro">视频、图像一处收藏。内置插件 v{{ browsers[0]?.bundledVersion || '0.1.9' }}，可独立使用或连接桌面端。</p>
+          <section class="plugin-updates" aria-label="插件更新检查">
+            <div class="update-heading"><div><strong>插件更新</strong><small>从 GitHub 检查独立插件正式版</small></div><button class="button secondary" :disabled="checking || downloading" @click="checkUpdates">{{ checking ? '正在检查…' : '检查插件更新' }}</button></div>
+            <div v-if="latest" class="update-result" role="status"><strong>最新插件 v{{ latest.version }}</strong><p>{{ updateHint }}</p><div class="update-actions"><button class="button primary" :disabled="downloading" @click="downloadLatest">{{ downloading ? '正在下载并校验…' : '下载新版插件 ZIP' }}</button><button class="text-button" @click="openRelease">发布页面 ↗</button></div><details v-if="latest.notes"><summary>更新说明</summary><p class="update-notes">{{ latest.notes }}</p></details><p v-if="updateSaved" class="update-saved">已下载并通过 SHA256 校验。请解压覆盖原插件目录，再刷新浏览器扩展与网页。</p></div>
+            <p v-if="updateError" class="task-error" role="alert">{{ updateError }}</p>
+          </section>
           <div v-for="browser in browsers" :key="browser.id" class="browser-choice">
             <div><strong>{{ browser.name }}</strong><small><Check v-if="browser.connected" :size="12" />{{ browser.connected ? browser.extensionVersion ? `已连接 · 插件 v${browser.extensionVersion}` : '已连接 · 旧插件未报告版本' : browser.installed ? '已检测到浏览器 · 尚未连接插件' : '未安装' }}</small><small v-if="browser.updateAvailable || browser.refreshRequired">{{ browser.updateAvailable ? `可更新至 v${browser.bundledVersion}` : '请更新插件文件并在浏览器刷新扩展与网页' }}</small></div>
-            <button class="button" :class="browser.connected ? 'secondary' : 'primary'" :disabled="busy" @click="install(browser.id)">{{ browser.installed ? browser.updateAvailable || browser.refreshRequired ? '更新插件' : browser.connected ? '管理插件' : '安装插件' : '下载浏览器' }}</button>
+            <button class="button" :class="browser.connected ? 'secondary' : 'primary'" :disabled="busy || downloading" @click="install(browser.id)">{{ remoteNewer && browser.installed ? '下载新版插件' : browser.installed ? browser.updateAvailable || browser.refreshRequired ? '更新插件' : browser.connected ? '管理插件' : '安装插件' : '下载浏览器' }}</button>
           </div>
           <section class="extension-package" aria-label="插件 ZIP 本地安装">
             <span class="package-icon"><FileArchive :size="25" /></span>
@@ -69,6 +81,7 @@ onUnmounted(() => { disposed = true; clearInterval(timer) })
 </template>
 
 <style scoped>
+.extension-modal{max-height:calc(100vh - 48px);display:flex;flex-direction:column;overflow:hidden}.extension-body{overflow-y:auto;min-height:0}.modal-header,.modal-footer{flex-shrink:0}.plugin-updates{border:1px solid #e2ecfa;border-radius:12px;background:#f7faff;padding:13px 15px;margin:14px 0 4px}.update-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.update-heading>div{display:flex;flex-direction:column;gap:5px}.update-heading strong,.update-result>strong{font-size:12px;color:#5b7fae}.update-heading small,.update-result p{font-size:10px;line-height:1.8;color:#91a6c3}.update-heading button,.update-actions button{font-size:10px}.update-result{margin-top:12px;border-top:1px solid #e5edf9;padding-top:12px}.update-actions{display:flex;align-items:center;gap:12px}.update-result details{font-size:10px;color:#8199b8;margin-top:12px}.update-notes{white-space:pre-wrap;overflow-wrap:anywhere;max-height:170px;overflow:auto}.update-saved{color:#63a68a!important}
 .extension-tile{margin:17px 10px 7px;padding:13px 15px;text-align:left;border:1px solid #dfebfb;border-radius:13px;background:linear-gradient(135deg,#f7fbff,#edf4ff);color:#6887b3;display:grid;grid-template-columns:26px 1fr;gap:5px 7px;flex-shrink:0}.extension-symbol{grid-row:span 2;color:#76a5e6;align-self:center}.extension-tile strong{font-size:12px;font-weight:550}.extension-tile small{font-size:9px;color:#98adca}.extension-link{grid-column:2;display:flex;gap:5px;align-items:center;font-size:10px;margin-top:4px;color:#4d8ce7}
 .extension-modal{width:550px}.extension-body{padding:0 28px 20px}.extension-intro{font-size:11px;line-height:1.9;color:#90a4bf}.browser-choice{display:flex;justify-content:space-between;align-items:center;padding:15px 0;border-bottom:1px solid #eaf0f8}.browser-choice strong{font-size:13px;color:#607d9f}.browser-choice small{display:flex;gap:4px;font-size:10px;color:#98acc6;margin-top:7px}
 .extension-package{display:flex;align-items:center;gap:13px;background:#f5f9ff;border:1px solid #e2ecfa;border-radius:12px;padding:17px 15px;margin-top:20px}.package-icon{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:44px;height:48px;border-radius:11px;background:#eaf2ff;color:#77a1d9}.package-copy{min-width:0;flex:1;display:flex;flex-direction:column;gap:6px}.package-copy strong{font-size:12px;font-weight:600;color:#5b7fae}.package-copy small{font-size:9px;color:#92a8c5;line-height:1.6}.package-download{font-size:10px;gap:6px;padding:9px 11px;flex-shrink:0}
