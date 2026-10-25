@@ -11,7 +11,7 @@ export async function getSnapshot(): Promise<AppSnapshot> {
     tasks: [],
     settings: { downloadDir: '', concurrency: 2, downloadConnections: 8, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
     siteSessions: [],
-    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.2.1',
+    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.2.3',
   }
   return invoke('get_snapshot')
 }

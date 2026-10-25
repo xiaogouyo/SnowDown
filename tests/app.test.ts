@@ -78,6 +78,21 @@ describe('desktop download flow', () => {
     expect(wrapper.get('[aria-label="视频下载设置"]').text()).toContain(video.title)
     expect(wrapper.find('.modal-overlay').exists()).toBe(false)
   })
+  it('keeps an in-flight parse and download options when switching modes in both directions', async () => {
+    await flushPromises()
+    let complete!: (value: VideoInfo) => void
+    api.inspectVideo.mockImplementationOnce(() => new Promise(resolve => { complete = resolve }))
+    await wrapper.get('[aria-label="视频链接"]').setValue('BV1xx411c7mD')
+    await wrapper.get('.link-form').trigger('submit'); await flushPromises()
+    await wrapper.get('[aria-label="切换到简约模式"]').trigger('click'); await flushPromises()
+    expect(wrapper.find('.minimal-loading').exists()).toBe(true)
+    complete(video); await flushPromises()
+    await wrapper.get('.minimal-segments button:nth-child(2)').trigger('click')
+    await wrapper.get('[aria-label="切换回完整模式"]').trigger('click'); await flushPromises()
+    expect(wrapper.get('.video-modal').text()).toContain(video.title)
+    expect(wrapper.find('.format-option.chosen').text()).toContain('音频')
+    expect(api.inspectVideo).toHaveBeenCalledTimes(1)
+  })
   it('auto parses a stable recognized input once and reuses native prepared results', async () => {
     await minimal(); vi.useFakeTimers()
     await wrapper.get('[aria-label="简约视频链接"]').setValue('BV1xx411c7mD')

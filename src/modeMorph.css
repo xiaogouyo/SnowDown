@@ -1,0 +1,14 @@
+.app-shell { position: relative; }
+.mode-switch-capture { position: fixed; inset: 0; z-index: 1000; overflow: hidden; pointer-events: none; background: #f6f8fb; }
+.mode-switch-capture > .standard-mode { display: flex !important; }
+.mode-reveal-layer { position: absolute !important; inset: 0; z-index: 1001; pointer-events: none; }
+.standard-mode.mode-reveal-layer { background: #f6f8fb; }
+.mode-morph-bar { position: fixed; z-index: 1002; border: 1px solid; overflow: hidden; pointer-events: none; contain: layout style; }
+.mode-morph-text, .mode-morph-link, .mode-morph-glyph, .mode-morph-action, .mode-morph-extra, .mode-morph-label { position: absolute; margin: 0; }
+.mode-morph-text { display: flex; align-items: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mode-morph-action { z-index: 1; }
+.mode-morph-link, .mode-morph-glyph { z-index: 2; }
+.mode-morph-extra { z-index: 2; pointer-events: none; }
+.mode-morph-label { display: flex; align-items: center; z-index: 2; white-space: nowrap; }
+.mode-morph-brand { z-index: 1003; pointer-events: none; background: transparent; }
+.mode-switching { pointer-events: none; }

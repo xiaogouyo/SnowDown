@@ -12,6 +12,8 @@ import BatchDownload from './components/BatchDownload.vue'
 import UpdateCenter from './components/UpdateCenter.vue'
 import MinimalMode from './components/MinimalMode.vue'
 import BrowserExtension from './components/BrowserExtension.vue'
+import { prepareModeMorph } from './modeMorph'
+import './modeMorph.css'
 import { identifySource, platformLabels, sourceSummary } from './sources'
 import { bytes, duration, errorMessage, statusLabels } from './format'
 import type { AppSnapshot, BatchOptions, BatchResult, ClipboardCapture, ClipboardSnapshot, DownloadTask, OutputFormat, Settings, VideoInfo, LoginQr, Platform, SourceLink } from './types'
@@ -30,7 +32,8 @@ const modeSwitching = ref(false)
 const simpleOptions = reactive<BatchOptions>({ downloadDir: '', intervalSecs: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false })
 const simpleTaskIds = ref<string[]>([])
 let simpleSessionStart = Date.now()
-let modeTimer: ReturnType<typeof setTimeout> | undefined
+const appShell = ref<HTMLElement>()
+let activeMorph: ReturnType<typeof prepareModeMorph> = null
 let autoParseTimer: ReturnType<typeof setTimeout> | undefined
 let lastAutoSource = ''
 let parseGeneration = 0
@@ -112,14 +115,20 @@ function notify(text: string, type: 'success' | 'error' | 'info' = 'info') {
 
 function setView(next: typeof view.value) { view.value = next; selectedTasks.value = []; filter.value = 'all'; query.value = '' }
 function focusLink() { setView('active'); if (simpleMode.value) void simpleView.value?.focus(); else linkInput.value?.focus() }
-async function toggleSimpleMode() {
-  if (submitting.value) return
-  clearTimeout(modeTimer); modeSwitching.value = true
+async function toggleSimpleMode(event?: MouseEvent) {
+  if (submitting.value || modeSwitching.value) return
+  activeMorph = prepareModeMorph(appShell.value?.querySelector<HTMLElement>(simpleMode.value ? '.minimal-mode' : '.standard-mode') ?? null, event)
+  modeSwitching.value = true
   simpleMode.value = !simpleMode.value
   if (simpleMode.value) { simpleExpanded.value = !!video.value || analyzing.value; if (!simpleTaskIds.value.length) simpleSessionStart = Date.now() }
   try { localStorage.setItem('snowdown.interface', simpleMode.value ? 'minimal' : 'full') } catch { /* The current session still works without storage. */ }
-  modeTimer = setTimeout(() => { modeSwitching.value = false }, 380)
-  await nextTick(); focusLink()
+  try {
+    await nextTick()
+    await activeMorph?.play(appShell.value?.querySelector<HTMLElement>(simpleMode.value ? '.minimal-mode' : '.standard-mode') ?? null)
+  } finally {
+    activeMorph?.cancel(); activeMorph = null; modeSwitching.value = false
+    if (!disposed) { await nextTick(); focusLink() }
+  }
 }
 function resetSimple() {
   parseGeneration++; analyzing.value = false; video.value = null; link.value = ''; inputEdited.value = false
@@ -145,7 +154,7 @@ function batchQueued(result: BatchResult) {
 }
 
 async function analyze() {
-  if (analyzing.value || updateOpen.value) return
+  if (analyzing.value || updateOpen.value || modeSwitching.value) return
   if (simpleMode.value && pendingClipboard.value?.phase === 'parsing' && detectedSource.value?.url === pendingClipboard.value.source.url) { simpleExpanded.value = true; return }
   if (!link.value.trim()) { focusLink(); notify('先粘贴一个B站、抖音或小红书视频链接。'); return }
   const source = identifySource(link.value)
@@ -206,7 +215,7 @@ function discardClipboard() {
 }
 
 function applyClipboard() {
-  if (!mainFocused.value || !snapshot.value?.settings.clipboardEnabled || analyzing.value || submitting.value || (video.value && !simpleMode.value) || dialog.value || batchOpen.value || updateOpen.value) return
+  if (modeSwitching.value || !mainFocused.value || !snapshot.value?.settings.clipboardEnabled || analyzing.value || submitting.value || (video.value && !simpleMode.value) || dialog.value || batchOpen.value || updateOpen.value) return
   const capture = pendingClipboard.value
   if (!capture) return
   clipboardSuggestion.value = capture.source
@@ -241,14 +250,14 @@ async function parseClipboardSuggestion() {
 
 const clipboardMessage = computed(() => pendingClipboard.value?.phase === 'parsing' ? '正在后台解析' : pendingClipboard.value?.phase === 'ready' ? '已在后台解析，点击查看' : pendingClipboard.value?.phase === 'error' ? '后台解析失败，可点击重试' : '识别到新链接')
 const simpleAnalyzing = computed(() => analyzing.value || (pendingClipboard.value?.phase === 'parsing' && detectedSource.value?.url === pendingClipboard.value.source.url))
-watch([mainFocused, analyzing, submitting, video, dialog, batchOpen, updateOpen, () => snapshot.value?.settings.clipboardEnabled, () => snapshot.value?.settings.clipboardAutoParse], applyClipboard)
-watch([link, simpleMode, mainFocused, analyzing, submitting, () => pendingClipboard.value?.phase, () => pendingClipboard.value?.id], () => {
+watch([modeSwitching, mainFocused, analyzing, submitting, video, dialog, batchOpen, updateOpen, () => snapshot.value?.settings.clipboardEnabled, () => snapshot.value?.settings.clipboardAutoParse], applyClipboard)
+watch([link, simpleMode, modeSwitching, mainFocused, analyzing, submitting, () => pendingClipboard.value?.phase, () => pendingClipboard.value?.id], () => {
   clearTimeout(autoParseTimer)
   const source = identifySource(link.value)
-  if (!simpleMode.value || !mainFocused.value || analyzing.value || submitting.value || !source || source.url === lastAutoSource) return
+  if (modeSwitching.value || !simpleMode.value || !mainFocused.value || analyzing.value || submitting.value || !source || source.url === lastAutoSource) return
   if (pendingClipboard.value?.source.url === source.url && pendingClipboard.value.phase === 'parsing') return
   autoParseTimer = setTimeout(() => {
-    if (simpleMode.value && mainFocused.value && !analyzing.value && !submitting.value && identifySource(link.value)?.url === source.url && pendingClipboard.value?.phase !== 'parsing') void analyze()
+    if (!modeSwitching.value && simpleMode.value && mainFocused.value && !analyzing.value && !submitting.value && identifySource(link.value)?.url === source.url && pendingClipboard.value?.phase !== 'parsing') void analyze()
   }, 550)
 })
 
@@ -429,12 +438,12 @@ onMounted(async () => {
   } catch (error) { if (!disposed) notify(`初始化失败：${errorMessage(error)}`, 'error') }
 })
 
-onUnmounted(() => { disposed = true; parseGeneration++; unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); unwatchClipboard?.(); stopLogin(); clearTimeout(toastTimer); clearTimeout(modeTimer); clearTimeout(autoParseTimer); document.removeEventListener('keydown', onKey) })
+onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); unwatchClipboard?.(); stopLogin(); clearTimeout(toastTimer); clearTimeout(autoParseTimer); document.removeEventListener('keydown', onKey) })
 </script>
 
 <template>
-  <div class="app-shell">
-    <Transition name="mode-standard"><div v-show="!simpleMode" class="standard-mode">
+  <div ref="appShell" :class="['app-shell', { 'mode-switching': modeSwitching }]">
+    <div v-show="!simpleMode" class="standard-mode">
     <aside class="sidebar">
       <button class="brand" type="button" @click="toggleSimpleMode" aria-label="切换到简约模式" title="切换到简约模式">
         <span class="brand-mark"><Snowflake :size="23" :stroke-width="1.8" /></span>
@@ -551,11 +560,11 @@ onUnmounted(() => { disposed = true; parseGeneration++; unsubscribe?.(); unwatch
         <div class="workspace-note"><span class="note-icon"><ShieldCheck :size="16" /></span><div><strong>安心收藏，文件始终在你手中</strong><p>视频直接保存到本地。关闭窗口后，SnowDown 会在系统托盘继续下载。</p></div><span class="note-decoration"><Snowflake :size="33" :stroke-width="1" /></span></div>
       </main>
 
-      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="updateCenter?.open()">v{{ snapshot?.version ?? '0.2.1' }}</button></div></footer>
+      <footer class="statusbar"><span><span :class="['status-dot', { warning: !snapshot?.mediaReady }]"></span>{{ !api.desktop ? '浏览器界面预览 · 下载请使用桌面客户端' : snapshot?.mediaReady ? '下载引擎已就绪' : '正在检查音视频组件' }}</span><div><span><ArrowDown :size="12" />{{ bytes(totalSpeed) }}/s</span><span>{{ runningTasks.length }} 个进行中</span><button @click="updateCenter?.open()">v{{ snapshot?.version ?? '0.2.3' }}</button></div></footer>
     </div>
 
-    </div></Transition>
-    <Transition name="mode-minimal"><MinimalMode v-if="simpleMode" ref="simpleView" :link="link" :source="detectedSource" :video="video" :expanded="simpleExpanded" :analyzing="simpleAnalyzing" :submitting="submitting" :quality="quality" :format="format" :pages="selectedPages" :options="simpleOptions" :tasks="simpleTasks" :error="simpleError" :notice="simpleNotice" :maximized="maximized" :clipboard-hint="clipboardSuggestion ? clipboardMessage : ''" @update:link="simpleInput" @update:quality="quality = $event" @update:format="format = $event" @update:pages="selectedPages = $event" @update:options="value => Object.assign(simpleOptions, value)" @analyze="analyze" @submit="submit" @reset="resetSimple" @toggle="toggleSimpleMode" @choose-folder="chooseSimpleFolder" @window="controlWindow" @task="action" @clipboard="parseClipboardSuggestion" /></Transition>
+    </div>
+    <MinimalMode v-if="simpleMode" ref="simpleView" :link="link" :source="detectedSource" :video="video" :expanded="simpleExpanded" :analyzing="simpleAnalyzing" :submitting="submitting" :quality="quality" :format="format" :pages="selectedPages" :options="simpleOptions" :tasks="simpleTasks" :error="simpleError" :notice="simpleNotice" :maximized="maximized" :clipboard-hint="clipboardSuggestion ? clipboardMessage : ''" @update:link="simpleInput" @update:quality="quality = $event" @update:format="format = $event" @update:pages="selectedPages = $event" @update:options="value => Object.assign(simpleOptions, value)" @analyze="analyze" @submit="submit" @reset="resetSimple" @toggle="toggleSimpleMode" @choose-folder="chooseSimpleFolder" @window="controlWindow" @task="action" @clipboard="parseClipboardSuggestion" />
 
     <Transition name="toast"><div v-if="toast && !simpleMode" :class="['toast-message', toast.type]" role="status"><CircleAlert v-if="toast.type === 'error'" :size="18" /><CircleCheck v-else-if="toast.type === 'success'" :size="18" /><Info v-else :size="18" /><span>{{ toast.text }}</span><button aria-label="关闭提示" @click="toast = null"><X :size="15" /></button></div></Transition>
 
@@ -627,6 +636,6 @@ onUnmounted(() => { disposed = true; parseGeneration++; unsubscribe?.(); unwatch
       </section>
     </div>
 
-    <div v-if="dialog === 'about' && !simpleMode" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.2.1' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="openUpdateCenter">检查更新<RotateCcw :size="14" /></button></section></div>
+    <div v-if="dialog === 'about' && !simpleMode" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.2.3' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="openUpdateCenter">检查更新<RotateCcw :size="14" /></button></section></div>
   </div>
 </template>

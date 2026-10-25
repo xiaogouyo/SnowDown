@@ -15,6 +15,8 @@ mod engine;
 mod login_check_probe;
 #[cfg(debug_assertions)]
 mod minimal_probe;
+#[cfg(all(debug_assertions, windows))]
+mod mode_morph_probe;
 mod model;
 mod qr_login;
 mod resource_download;
@@ -616,6 +618,10 @@ pub fn run() {
             #[cfg(debug_assertions)]
             let data_dir = if std::env::var_os("SNOWDOWN_QR_VERIFY").is_some() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/qr-qa-app-data")
+            } else if std::env::var_os("SNOWDOWN_MODE_MORPH_VERIFY").is_some() {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../.tools/mode-morph-qa")
+                    .join(uuid::Uuid::new_v4().to_string())
             } else if std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("../.tools/login-check-qa")
@@ -647,6 +653,7 @@ pub fn run() {
             let default_download = if std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some()
                 || std::env::var_os("SNOWDOWN_BROWSER_VERIFY").is_some()
                 || std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some()
+                || std::env::var_os("SNOWDOWN_MODE_MORPH_VERIFY").is_some()
             {
                 data_dir.join("media")
             } else {
@@ -696,7 +703,8 @@ pub fn run() {
             update_notice::create(&handle)?;
             #[cfg(debug_assertions)]
             let browser_test = std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some()
-                || std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some();
+                || std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some()
+                || std::env::var_os("SNOWDOWN_MODE_MORPH_VERIFY").is_some();
             #[cfg(not(debug_assertions))]
             let browser_test = false;
             if !browser_test {
@@ -715,7 +723,10 @@ pub fn run() {
                 }
             });
             #[cfg(debug_assertions)]
-            if std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some() {
+            if std::env::var_os("SNOWDOWN_MODE_MORPH_VERIFY").is_some() {
+                #[cfg(windows)]
+                mode_morph_probe::start(handle.clone());
+            } else if std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some() {
                 #[cfg(windows)]
                 login_check_probe::start(handle.clone(), data_dir.clone());
             } else if std::env::var_os("SNOWDOWN_BROWSER_VERIFY").is_some() {

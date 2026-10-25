@@ -2,18 +2,18 @@
 
 Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红书视频。采用 Tauri 2、Vue 3、TypeScript 与 Rust，下载文件在本机处理和保存。
 
-## 下载 v0.2.1
+## 下载 v0.2.3
 
-- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.1/SnowDown_0.2.1_x64-setup.exe)
-- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.1/SnowDown_0.2.1_Windows_x64_portable.zip)
-- [浏览器插件 v0.1.0](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.1/SnowDown_BrowserExtension_0.1.0.zip)
-- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.1)
+- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.3/SnowDown_0.2.3_x64-setup.exe)
+- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.3/SnowDown_0.2.3_Windows_x64_portable.zip)
+- [浏览器插件 v0.1.0](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.3/SnowDown_BrowserExtension_0.1.0.zip)
+- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.3)
 
 需要 Windows 10/11 x64 和 WebView2 运行时。免安装版请完整解压后启动，保留 `resources` 文件夹。下载文件的 SHA256 校验值随 Release 提供。
 
 ## 简约模式
 
-点击左上角 SnowDown 标志进入简约模式，再次点击标志回到完整模式。两种界面带切换动画，并记住上次使用的模式。
+点击左上角 SnowDown 标志进入简约模式，再次点击标志回到完整模式。v0.2.3 切换时，输入框连续移动、改变尺寸与圆角，下载按钮逐渐变为简约箭头，背景从实际点击位置圆形扩散；切回完整模式也有对应过渡，并记住上次使用的模式。开启系统“减少动态效果”时直接切换。
 
 空闲时保留标志、窗口按钮和居中的圆角输入框。输入或粘贴支持的链接后自动识别解析，也可按 Enter 立即解析；输入框随动画缩小并移到顶部，下面直接显示视频信息、格式、画质、保存目录、附件和分P选择，以及下载队列进度。下载选择在页面内展开，可直接暂停、继续或定位文件。单次下载设置不改变全局偏好。
 
