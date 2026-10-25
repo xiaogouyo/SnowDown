@@ -3,6 +3,25 @@ use std::sync::Arc;
 use tauri::{Manager, WebviewWindow};
 use url::Url;
 
+fn metadata_route(input: &str) -> bool {
+    let Ok(url) = Url::parse(input) else {
+        return false;
+    };
+    url.scheme() == "https"
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && sites::host_matches(url.host_str().unwrap_or_default(), "douyin.com")
+        && [
+            "/aweme/v1/web/aweme/detail/",
+            "/aweme/v1/web/tab/feed/",
+            "/aweme/v1/web/feed/",
+            "/aweme/v1/web/aweme/related/",
+            "/aweme/v1/web/mix/aweme/",
+        ]
+        .contains(&url.path())
+}
+
 fn detail_source(input: &str) -> Option<sites::Source> {
     let url = Url::parse(input).ok()?;
     if url.scheme() != "https"
@@ -48,7 +67,7 @@ pub fn attach(window: &WebviewWindow, destination: Url) -> Result<(), String> {
                 let events = core.cast::<ICoreWebView2_2>()?;
                 let callback_app = app.clone();
                 let handler =
-                    WebResourceResponseReceivedEventHandler::create(Box::new(move |_, args| {
+                    WebResourceResponseReceivedEventHandler::create(Box::new(move |core, args| {
                         let Some(args) = args else {
                             return Ok(());
                         };
@@ -56,7 +75,22 @@ pub fn attach(window: &WebviewWindow, destination: Url) -> Result<(), String> {
                         let mut uri = PWSTR::null();
                         request.Uri(&mut uri)?;
                         let uri = CoTaskMemPWSTR::from(uri);
-                        let Some(source) = detail_source(&uri.to_string()) else {
+                        let request_url = uri.to_string();
+                        if !metadata_route(&request_url) {
+                            return Ok(());
+                        }
+                        let Some(core) = core else {
+                            return Ok(());
+                        };
+                        let mut page_url = PWSTR::null();
+                        core.Source(&mut page_url)?;
+                        let page_url = CoTaskMemPWSTR::from(page_url);
+                        let source = detail_source(&request_url).or_else(|| {
+                            sites::recognize(&page_url.to_string())
+                                .ok()
+                                .filter(|source| source.platform == Platform::Douyin)
+                        });
+                        let Some(source) = source else {
                             return Ok(());
                         };
                         let response = args.Response()?;
@@ -133,6 +167,22 @@ mod tests {
             "https://www.douyin.com/aweme/v1/web/query/account/type/?aweme_id=1234567890123456789"
         )
         .is_none());
+    }
+    #[test]
+    fn feed_metadata_routes_exclude_account_and_untrusted_hosts() {
+        for path in ["tab/feed/", "feed/", "aweme/related/", "mix/aweme/"] {
+            assert!(metadata_route(&format!(
+                "https://www.douyin.com/aweme/v1/web/{path}"
+            )));
+        }
+        for url in [
+            "https://www.douyin.com/passport/web/account/info/",
+            "https://www.douyin.com/aweme/v1/web/query/account/type/",
+            "https://douyin.com.evil.test/aweme/v1/web/tab/feed/",
+            "http://www.douyin.com/aweme/v1/web/tab/feed/",
+        ] {
+            assert!(!metadata_route(url));
+        }
     }
 }
 

@@ -1,5 +1,5 @@
 // Executes in the current tab's MAIN world. No form values or arbitrary cookies.
-export async function capturePage({resources:includeResources=false,backgrounds=true}={}){
+export function capturePage({resources:includeResources=false,backgrounds=true}={}){
   const url=location.href,host=location.hostname;
   const matches=base=>host===base||host.endsWith(`.${base}`);
   const platform=matches('bilibili.com')?'bilibili':matches('douyin.com')?'douyin':matches('xiaohongshu.com')?'xiaohongshu':null;
@@ -15,17 +15,51 @@ export async function capturePage({resources:includeResources=false,backgrounds=
     for(const match of value.matchAll(/url\(["']?(https?:[^"')]+)["']?\)/g))resources.push({url:match[1],kind:'image'});
   }
   let id=platform==='douyin'?(new URL(url).searchParams.get('modal_id')||url.match(/\/video\/(\d+)/)?.[1]):platform==='xiaohongshu'?url.match(/\/(?:explore|item)\/([a-f\d]{24})/)?.[1]:url.match(/BV[\w]{10}/)?.[0];
-  const roots=[window.__INITIAL_STATE__,window._ROUTER_DATA,window.__UNIVERSAL_DATA_FOR_REHYDRATION__,window.__snowdownMediaDetails];
-  for(const script of document.querySelectorAll('script#RENDER_DATA,script#__NEXT_DATA__')){try{roots.push(JSON.parse(decodeURIComponent(script.textContent)))}catch{}}
+  const roots=[...(Array.isArray(window.__snowdownMediaDetails)?window.__snowdownMediaDetails.slice(-4).reverse():[]),window.__INITIAL_STATE__,window._ROUTER_DATA,window.__UNIVERSAL_DATA_FOR_REHYDRATION__];
+  for(const script of document.querySelectorAll('script#RENDER_DATA,script#__NEXT_DATA__')){const raw=script.textContent;if(!raw||raw.length>3*1024*1024)continue;try{roots.push(JSON.parse(raw))}catch{try{roots.push(JSON.parse(decodeURIComponent(raw)))}catch{}}}
   let detail=null,seen=new Set(),count=0;
+  function address(value){
+    if(!value)return null;
+    const list=typeof value==='string'?[value]:Array.isArray(value)?value.flatMap(item=>address(item)?.url_list||[]):value.url_list||value.urlList||[value.src||value.url];
+    const urls=(Array.isArray(list)?list:[]).filter(url=>typeof url==='string'&&/^https?:\/\//.test(url)).slice(0,6);
+    return urls.length?{url_list:urls,width:Number(value.width)||0,height:Number(value.height)||0}:null;
+  }
+  function project(value){
+    const video=value.video;
+    const variants=video.bit_rate||video.bitRateList;
+    const rates=(Array.isArray(variants)?variants:[]).slice(0,32).map(rate=>({play_addr:address(rate.play_addr||rate.playAddr),bit_rate:Number(rate.bit_rate||rate.bitRate)||0})).filter(rate=>rate.play_addr);
+    const direct=address(video.play_addr||video.playAddr),h264=address(video.play_addr_h264||video.playAddrH264),hevc=address(video.play_addr_bytevc1||video.playAddrBytevc1);
+    if(!direct&&!h264&&!hevc&&!rates.length)return null;
+    const audioRates=video.bit_rate_audio||video.bitRateAudio;
+    const audio=(Array.isArray(audioRates)?audioRates:[]).slice(0,16).map(rate=>{const meta=rate.audio_meta||rate.audioMeta||{},urls=meta.url_list||meta.urlList||{};return {audio_meta:{bitrate:Number(meta.bitrate)||0,url_list:{main_url:urls.main_url||urls.mainUrl,backup_url:urls.backup_url||urls.backupUrl}}}});
+    return {aweme_detail:{aweme_id:id,desc:String(value.desc||'').slice(0,1000),author:{nickname:String(value.author?.nickname||'').slice(0,100)},video:{width:Number(video.width)||0,height:Number(video.height)||0,duration:Number(video.duration)||0,cover:address(video.cover),play_addr:direct,play_addr_h264:h264,play_addr_bytevc1:hevc,bit_rate:rates,bit_rate_audio:audio}}};
+  }
   function find(value,depth=0){if(!value||typeof value!=='object'||seen.has(value)||depth>18||++count>18000)return;seen.add(value);
-    if(platform==='douyin'&&String(value.aweme_id||value.awemeId)===id&&value.video)detail={aweme_detail:{...value,aweme_id:String(value.aweme_id||value.awemeId)}};
+    if(value===window||value instanceof Node)return;
+    if(platform==='douyin'&&String(value.aweme_id||value.awemeId)===id&&value.video){try{detail=project(value)}catch{}}
     if(platform==='xiaohongshu'&&(value.noteId===id||value.id===id)&&value.video)detail={note:{noteDetailMap:{[id]:{note:value}}}};
-    if(!detail)for(const key of Object.keys(value).slice(0,300))find(value[key],depth+1);
+    if(!detail)for(const key of Object.keys(value).slice(0,300)){try{find(value[key],depth+1)}catch{}if(detail)break;}
   }
   if(platform==='douyin'||platform==='xiaohongshu')for(const root of roots){find(root);if(detail)break;}
+  // A tab may already be playing when the extension is installed/reloaded. Inspect
+  // bounded React props adjacent to the player; return only the exact video's fields.
+  if(platform==='douyin'&&!detail&&id){
+    seen=new Set();count=0;
+    for(const video of [...document.querySelectorAll('video')].slice(0,12)){
+      for(let node=video,level=0;node&&level<12&&!detail;node=node.parentElement,level++){
+        for(const key of Object.keys(node).filter(key=>/^__react(?:Props|Fiber)\$/.test(key))){
+          let value;try{value=node[key]}catch{continue}
+          if(key.startsWith('__reactProps'))find(value);
+          else for(let fiber=value,n=0;fiber&&n<12&&!detail;fiber=fiber.return,n++){find(fiber.memoizedProps);if(!detail)find(fiber.pendingProps)}
+          if(detail)break;
+        }
+      }
+      if(detail)break;
+    }
+  }
   const root=platform==='douyin'?document.querySelector('[data-e2e="user-avatar"],[data-e2e="user-info"],header a[href*="/user/"]'):platform==='xiaohongshu'?[...document.querySelectorAll('a[href*="/user/profile/"]')].find(n=>/^(我|我的|个人主页)$/.test(n.textContent.trim())):null;
   const image=root?.querySelector('img')||(root?.tagName==='IMG'?root:null);
   const account=image?{name:(root?.title||image.alt||'').slice(0,80),avatar:image.currentSrc||image.src}:null;
-  return {url,platform,id,title:document.title.slice(0,200),detail,account,resources};
+  const verificationRequired=platform==='douyin'&&/验证码中间页|安全验证|security verification/i.test(document.title);
+  return {url,platform,id,title:document.title.slice(0,200),detail,account,resources,verificationRequired};
 }

@@ -2,6 +2,7 @@
 // the requested video, never form values, credentials, or unrelated page state.
 (() => {
   const id = __VIDEO_ID__;
+  __CAPTURE_PAGE_SOURCE__
   const result = { pageUrl: location.href, title: document.title };
   const note = window.__INITIAL_STATE__?.note?.noteDetailMap?.[id]?.note;
   if (note) result.state = { note: { noteDetailMap: { [id]: { note: {
@@ -9,23 +10,12 @@
     imageList: (note.imageList || []).slice(0, 1).map(x => ({ urlDefault: x.urlDefault })),
     video: { media: { stream: note.video?.media?.stream } }
   } } } } };
-  const seen = new Set();
-  function find(value, depth) {
-    if (!value || typeof value !== 'object' || depth > 7 || seen.has(value)) return null;
-    seen.add(value);
-    if (String(value.aweme_id) === id && value.video) return value;
-    for (const child of Object.values(value).slice(0, 150)) {
-      const found = find(child, depth + 1); if (found) return found;
-    }
-    return null;
-  }
-  let detail = find(window._ROUTER_DATA, 0);
-  if (!detail) {
-    try {
-      const raw = document.getElementById('RENDER_DATA')?.textContent;
-      if (raw && raw.length < 2 * 1024 * 1024) detail = find(JSON.parse(decodeURIComponent(raw)), 0);
-    } catch { /* Page configurations may not contain video metadata. */ }
-  }
+  let detail;
+  try { const page = capturePage(); detail = page.detail?.aweme_detail; result.verificationRequired = page.verificationRequired; }
+  catch(error) { result.readerError = error.name; }
+  result.captureStatus = { readyState: document.readyState, captured: window.__snowdownMediaDetails?.length || 0,
+    hookInstalled: !!window.__snowdownCaptureInstalled, routerPresent: !!window._ROUTER_DATA,
+    players: document.querySelectorAll('video').length };
   if (detail) result.detail = {
     aweme_id: detail.aweme_id, desc: detail.desc,
     author: { nickname: detail.author?.nickname },

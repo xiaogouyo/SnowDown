@@ -236,17 +236,41 @@ impl Sessions {
             observed.errors += 1;
             return;
         };
-        let detail = &value["aweme_detail"];
-        let id = detail["aweme_id"]
-            .as_str()
-            .map(str::to_string)
-            .or_else(|| detail["aweme_id"].as_u64().map(|n| n.to_string()));
         let Ok(expected) = sites::video_id(source) else {
             return;
         };
-        if id.as_deref() != Some(&expected) {
-            return;
+        fn matching<'a>(
+            value: &'a serde_json::Value,
+            id: &str,
+            source: &sites::Source,
+            depth: usize,
+            visited: &mut usize,
+        ) -> Option<&'a serde_json::Value> {
+            if depth > 18 || *visited >= 18000 {
+                return None;
+            }
+            *visited += 1;
+            let matches_id = value["aweme_id"].as_str() == Some(id)
+                || value["aweme_id"].as_u64().is_some_and(|number| number.to_string() == id);
+            if matches_id && value["video"].is_object()
+                && sites::from_detail(source, &serde_json::json!({"aweme_detail":{"aweme_id":id,"video":value["video"]}}), 0).is_ok() {
+                return Some(value);
+            }
+            match value {
+                serde_json::Value::Array(items) => items
+                    .iter()
+                    .take(300)
+                    .find_map(|item| matching(item, id, source, depth + 1, visited)),
+                serde_json::Value::Object(items) => items
+                    .values()
+                    .take(300)
+                    .find_map(|item| matching(item, id, source, depth + 1, visited)),
+                _ => None,
+            }
         }
+        let Some(detail) = matching(&value, &expected, source, 0, &mut 0) else {
+            return;
+        };
         let video = &detail["video"];
         #[cfg(debug_assertions)]
         if std::env::var_os("SNOWDOWN_TEST_SOURCE").is_some() {
@@ -285,8 +309,15 @@ impl Sessions {
         }
         let pared = serde_json::json!({"aweme_detail":{
             "aweme_id": expected, "desc": detail["desc"], "author":{"nickname":detail["author"]["nickname"]},
-            "video": video
+            "video": {"width":video["width"],"height":video["height"],"duration":video["duration"],"cover":video["cover"],
+                "play_addr":video["play_addr"],"play_addr_h264":video["play_addr_h264"],"play_addr_bytevc1":video["play_addr_bytevc1"],
+                "bit_rate":video["bit_rate"],"bit_rate_audio":video["bit_rate_audio"]}
         }});
+        // Incomplete feed items must not poison the cache and short-circuit a
+        // subsequent valid HTTP/page result for the next five minutes.
+        if sites::from_detail(source, &pared, 0).is_err() {
+            return;
+        }
         observed
             .details
             .retain(|_, (time, _)| time.elapsed() < Duration::from_secs(300));
@@ -542,7 +573,11 @@ impl Sessions {
         let _stop = Stop(window.clone());
         let result = tokio::time::timeout(Duration::from_secs(18), async {
             loop {
-                if let Ok(resolved) = read_video(app, source, quality).await { return Ok(resolved); }
+                match read_video(app, source, quality).await {
+                    Ok(resolved) => return Ok(resolved),
+                    Err(error) if error.starts_with("平台安全验证：") => return Err(error),
+                    Err(_) => {}
+                }
                 if window.url().ok().is_some_and(|url| url.path().contains("login")) {
                     return Err(format!("{}需要登录，请点击“登录{}”完成登录后，再点击“解析视频”。", source.platform.label(), source.platform.label()));
                 }
@@ -616,6 +651,7 @@ fn open_parser(app: &AppHandle, source: &sites::Source) -> Result<tauri::Webview
         WebviewUrl::External("about:blank".parse().unwrap()),
     )
     .title("SnowDown 后台解析")
+    .initialization_script(include_str!("../../extension/page-hook.js"))
     .inner_size(1100.0, 780.0)
     .visible(false)
     .focused(false)
@@ -644,9 +680,6 @@ async fn read_video(
     quality: u32,
 ) -> Result<sites::Resolved, String> {
     let path = diagnostics_path();
-    if let Some(path) = &path {
-        let _ = tokio::fs::write(path, b"{\"stage\":\"reading\"}").await;
-    }
     let result = read_video_inner(app, source, quality).await;
     if let Some(path) = &path {
         let mut diagnostic: serde_json::Value = tokio::fs::read(path)
@@ -698,10 +731,16 @@ async fn read_video_inner(
     {
         return Err("后台页面尚未加载输入链接对应的视频。".into());
     }
-    let script = include_str!("site_video.js").replace(
-        "__VIDEO_ID__",
-        &serde_json::to_string(&sites::video_id(source)?).unwrap(),
-    );
+    let script = include_str!("site_video.js")
+        .replace(
+            "__VIDEO_ID__",
+            &serde_json::to_string(&sites::video_id(source)?).unwrap(),
+        )
+        .replace(
+            "__CAPTURE_PAGE_SOURCE__",
+            &include_str!("../../extension/page.js")
+                .replace("export function capturePage", "function capturePage"),
+        );
     let mut data: serde_json::Value;
     let (tx, rx) = tokio::sync::oneshot::channel();
     let sender = Mutex::new(Some(tx));
@@ -723,7 +762,11 @@ async fn read_video_inner(
     if let Some(value) = data.as_str() {
         data = serde_json::from_str(value).map_err(|_| "网页视频数据无效。")?;
     }
-    let result = sites::from_browser(source, &data, quality);
+    let result = if data["verificationRequired"].as_bool() == Some(true) {
+        Err("平台安全验证：抖音返回了验证码页面，尚未提供视频数据。可在浏览器官方页面完成验证后，通过 SnowDown 插件读取并转发下载；或在平台账号中重新扫码后重试。".into())
+    } else {
+        sites::from_browser(source, &data, quality)
+    };
     if let Some(path) = diagnostics_path() {
         // Opt-in developer diagnostics: shape and hostnames only. Never record
         // credentials, query parameters, page bodies, titles, or media URLs.
@@ -756,7 +799,9 @@ async fn read_video_inner(
             "detailPresent": data["detail"].is_object(),
             "videoFields": data["detail"]["video"].as_object().map(|v| v.keys().collect::<Vec<_>>()),
             "mediaHosts": media_hosts,
-            "blobPlayer": data["player"]["url"].as_str().is_some_and(|url| url.starts_with("blob:"))
+            "blobPlayer": data["player"]["url"].as_str().is_some_and(|url| url.starts_with("blob:")),
+            "captureStatus": data["captureStatus"], "readerError":data["readerError"],
+            "verificationRequired": data["verificationRequired"]
         });
         let _ = tokio::fs::write(path, serde_json::to_vec(&diagnostic).unwrap_or_default()).await;
     }
@@ -907,6 +952,34 @@ mod tests {
         drop(observed);
         let other = sites::recognize("https://www.douyin.com/video/9876543210987654321").unwrap();
         sessions.remember_response(&other, &serde_json::to_vec(&value).unwrap());
+        assert!(sessions.observed_video(&other, 0).is_none());
+    }
+    #[test]
+    fn captured_feed_selects_exact_requested_video_without_caching_incomplete_items() {
+        let sessions = Sessions::open(
+            std::env::temp_dir().join(format!("snowdown-feed-{}", uuid::Uuid::new_v4())),
+        );
+        let source =
+            sites::recognize("https://www.douyin.com/jingxuan?modal_id=1234567890123456789")
+                .unwrap();
+        let expected = sites::video_id(&source).unwrap();
+        let empty = serde_json::json!({"aweme_list":[{"aweme_id":expected,"video":{}}]});
+        sessions.remember_response(&source, &serde_json::to_vec(&empty).unwrap());
+        assert!(sessions.observed_video(&source, 0).is_none());
+        let feed = serde_json::json!({"aweme_list":[{"aweme_id":"9876543210987654321","video":{"width":1}},
+            {"aweme_id":expected,"video":{}},
+            {"aweme_id":expected,"desc":"当前精选视频","author":{"nickname":"作者"},"video":{"width":720,"height":1280,"play_addr":{"url_list":["https://fixture.douyinvod.com/video.mp4"]}}}]});
+        sessions.remember_response(&source, &serde_json::to_vec(&feed).unwrap());
+        assert_eq!(
+            sessions
+                .observed_video(&source, 0)
+                .unwrap()
+                .unwrap()
+                .info
+                .title,
+            "当前精选视频"
+        );
+        let other = sites::recognize("https://www.douyin.com/video/1234567890123456790").unwrap();
         assert!(sessions.observed_video(&other, 0).is_none());
     }
     #[test]

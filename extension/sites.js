@@ -6,7 +6,7 @@ export function detailVideo(page){
  if(!source)return null;
  if(page.platform==='douyin'){
    const video=source.video;const variants=(video.bit_rate||[]).map(x=>({url:first(x.play_addr?.url_list),width:x.play_addr?.width||video.width,height:x.play_addr?.height||video.height,bitrate:x.bit_rate||0})).filter(x=>x.url).sort((a,b)=>b.bitrate-a.bitrate);
-   const direct=variants[0]||{url:first(video.play_addr?.url_list),width:video.width,height:video.height};
+   const direct=variants[0]||{url:first(video.play_addr?.url_list)||first(video.play_addr_h264?.url_list)||first(video.play_addr_bytevc1?.url_list),width:video.width,height:video.height};
    if(!direct.url)return null;const audio=(video.bit_rate_audio||[]).sort((a,b)=>(b.audio_meta?.bitrate||0)-(a.audio_meta?.bitrate||0))[0]?.audio_meta?.url_list;
    return {title:text(source.desc)||page.title,cover:first(video.cover?.url_list)||'',author:text(source.author?.nickname),duration:(video.duration||0)/1000,streams:[{...direct,quality:Math.min(direct.width||0,direct.height||0),label:'原始画质',audio:audio?.main_url||null}],detail:page.detail};
  }
@@ -26,4 +26,4 @@ export async function biliVideo(page){
  if(!streams.length)throw Error('当前账号没有可下载画质。');
  return {title:data.title,author:data.owner?.name,cover:data.pic,streams,duration:data.duration};
 }
-export async function parseVideo(page){if(!platformOf(page.url))throw Error('当前页不属于支持的平台。');if(page.platform==='bilibili')return biliVideo(page);const result=detailVideo(page);if(result)return result;throw Error('尚未取得当前视频详情，请播放视频后重试；首次安装可刷新页面。图集、直播或受限内容暂不支持。')}
+export async function parseVideo(page){if(!platformOf(page.url))throw Error('当前页不属于支持的平台。');if(page.platform==='bilibili')return biliVideo(page);const result=detailVideo(page);if(result)return result;if(page.verificationRequired)throw Error('抖音要求安全验证，请先在当前官方网页完成验证，然后重新读取视频。');throw Error('尚未取得当前视频详情，请播放视频后重试；首次安装可刷新页面。图集、直播或受限内容暂不支持。')}
