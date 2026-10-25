@@ -63,7 +63,7 @@ B站会话失效后需重新扫码；退出账号会删除本机保存的登录�
 登录成功后加密保存；已登录时可“退出账号”或“检查登录”。
 退出会清除软件内该平台的会话和网页登录资料，不影响外部浏览器账号。
 登录只负责账号授权，粘贴目标视频链接并点击“解析视频”才开始解析。
-首批支持视频笔记，不支持图集、直播或私密内容。浏览器插件 v0.1.0 可独立使用或连接桌面端。
+首批支持视频笔记，不支持图集、直播或私密内容。浏览器插件 v0.1.1 可独立使用或连接桌面端。
 从左侧浏览器插件贴片选择 Chrome 或 Edge，软件准备文件和绑定，用户在浏览器管理页确认加载已解压的扩展。
 联动安装不可用时，可在插件面板“下载 ZIP”，将内置插件离线保存到本机。
 解压 ZIP 后，在浏览器扩展管理页开启开发者模式，加载包含 manifest.json 的文件夹，并固定插件图标。
@@ -77,9 +77,9 @@ $taskInstallerDir = Join-Path $taskRoot 'src-tauri\target\release\bundle\snowdow
 if (Test-Path -LiteralPath $taskInstallerDir) {
     Get-ChildItem -LiteralPath $taskInstallerDir -Filter "SnowDown_$($taskVersion)_*-setup.exe" | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $taskRelease $_.Name) }
 }
-$taskExtensionPackage=Join-Path $taskRelease 'SnowDown_BrowserExtension_0.1.0.zip'
+$taskExtensionPackage=Join-Path $taskRelease 'SnowDown_BrowserExtension_0.1.1.zip'
 Compress-Archive -Path (Join-Path $taskRoot 'src-tauri\resources\browser-extension\*') -DestinationPath $taskExtensionPackage -CompressionLevel Optimal -Force
-Get-ChildItem -LiteralPath $taskRelease -File | Where-Object { ($_.Name -like "SnowDown_$($taskVersion)_*" -or $_.Name -eq 'SnowDown_BrowserExtension_0.1.0.zip') -and $_.Extension -in @('.zip', '.exe') } | ForEach-Object {
+Get-ChildItem -LiteralPath $taskRelease -File | Where-Object { ($_.Name -like "SnowDown_$($taskVersion)_*" -or $_.Name -eq 'SnowDown_BrowserExtension_0.1.1.zip') -and $_.Extension -in @('.zip', '.exe') } | ForEach-Object {
     $taskHash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower()
     "$taskHash  $($_.Name)"
 } | Set-Content -LiteralPath (Join-Path $taskRelease 'SHA256SUMS.txt') -Encoding ascii

@@ -8,6 +8,22 @@ use std::{
 };
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
+fn cached_quality(item: &sites::Resolved, quality: u32) -> bool {
+    item.quality == quality
+        || (quality == 0 && item.info.qualities.iter().map(|q| q.id).max() == Some(item.quality))
+}
+async fn first_success<T>(
+    first: impl std::future::Future<Output = Result<T, String>>,
+    second: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    tokio::pin!(first);
+    tokio::pin!(second);
+    tokio::select! {
+        result=&mut first=>match result {Ok(value)=>Ok(value),Err(_)=>second.await},
+        result=&mut second=>match result {Ok(value)=>Ok(value),Err(error)=>first.await.or(Err(error))},
+    }
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionStatus {
@@ -118,6 +134,7 @@ pub struct Sessions {
     media: Mutex<HashMap<(Platform, String), (Instant, sites::Resolved)>>,
     observed: Mutex<Observed>,
     parsers: [tokio::sync::Mutex<()>; 2],
+    resolvers: [tokio::sync::Mutex<()>; 2],
 }
 #[derive(Default)]
 struct Observed {
@@ -201,6 +218,7 @@ impl Sessions {
             media: Mutex::new(HashMap::new()),
             observed: Mutex::new(Observed::default()),
             parsers: [tokio::sync::Mutex::new(()), tokio::sync::Mutex::new(())],
+            resolvers: [tokio::sync::Mutex::new(()), tokio::sync::Mutex::new(())],
         }
     }
     pub fn cookie(&self, platform: Platform) -> String {
@@ -329,6 +347,14 @@ impl Sessions {
         if cookie.is_empty() || cookie.len() > 64 * 1024 || cookie.chars().any(char::is_control) {
             return Err("未取得有效网页会话，请先在官方页面完成登录或验证。".into());
         }
+        if self.cookie(platform) == cookie
+            && self
+                .directory
+                .join(format!("{}.dat", platform.key()))
+                .is_file()
+        {
+            return Ok(());
+        }
         let bytes = auth::crypt(cookie.as_bytes(), true)?;
         std::fs::create_dir_all(&self.directory).map_err(|_| "无法创建会话目录。")?;
         let path = self.directory.join(format!("{}.dat", platform.key()));
@@ -438,29 +464,46 @@ impl Sessions {
         source: &sites::Source,
         quality: u32,
     ) -> Result<sites::Resolved, String> {
+        let index = match source.platform {
+            Platform::Douyin => 0,
+            Platform::Xiaohongshu => 1,
+            _ => return Err("B站使用专用解析器。".into()),
+        };
+        let _request = self.resolvers[index].lock().await;
         let canonical = sites::canonical_source(source, &self.cookie(source.platform)).await?;
         let source = &canonical;
         let key = (source.platform, sites::video_id(source)?);
         {
             let mut media = self.media.lock().unwrap();
             media.retain(|_, (time, _)| time.elapsed() < Duration::from_secs(300));
-            if quality > 0 {
-                if let Some((_, cached)) =
-                    media.get(&key).filter(|(_, item)| item.quality == quality)
-                {
-                    return Ok(cached.clone());
-                }
+            if let Some((_, cached)) = media
+                .get(&key)
+                .filter(|(_, item)| cached_quality(item, quality))
+            {
+                return Ok(cached.clone());
             }
         }
         let result = if let Some(result) = self.observed_video(source, quality) {
             result?
-        } else if source.platform == Platform::Xiaohongshu {
-            match sites::resolve(source, quality, &self.cookie(source.platform)).await {
-                Ok(resolved) => resolved,
-                Err(_) => self.resolve_in_background(app, source, quality).await?,
-            }
         } else {
-            self.resolve_in_background(app, source, quality).await?
+            let cookie = self.cookie(source.platform);
+            // A blocked HTTP response must not consume 30 seconds before the
+            // browser even starts. Both paths are bounded; only a success wins.
+            first_success(
+                async {
+                    tokio::time::timeout(
+                        Duration::from_secs(7),
+                        sites::resolve(source, quality, &cookie),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err("平台直连读取超时。".into()))
+                },
+                async {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    self.resolve_in_background(app, source, quality).await
+                },
+            )
+            .await?
         };
         let result_key = (source.platform, result.info.bvid.clone());
         let mut media = self.media.lock().unwrap();
@@ -488,14 +531,22 @@ impl Sessions {
         if let Some(result) = self.observed_video(source, quality) {
             return result;
         }
+        self.restore_missing(app, source.platform, || true).await?;
         let window = open_parser(app, source)?;
-        let result = tokio::time::timeout(Duration::from_secs(25), async {
+        struct Stop(tauri::WebviewWindow);
+        impl Drop for Stop {
+            fn drop(&mut self) {
+                let _ = self.0.navigate("about:blank".parse().unwrap());
+            }
+        }
+        let _stop = Stop(window.clone());
+        let result = tokio::time::timeout(Duration::from_secs(18), async {
             loop {
-                tokio::time::sleep(Duration::from_millis(750)).await;
                 if let Ok(resolved) = read_video(app, source, quality).await { return Ok(resolved); }
                 if window.url().ok().is_some_and(|url| url.path().contains("login")) {
                     return Err(format!("{}需要登录，请点击“登录{}”完成登录后，再点击“解析视频”。", source.platform.label(), source.platform.label()));
                 }
+                tokio::time::sleep(Duration::from_millis(200)).await;
             }
         }).await.unwrap_or_else(|_| Err(format!("{}暂未返回此链接的视频详情。请确认链接有效；如需登录或验证，请在平台账号中完成后重新解析。", source.platform.label())));
         // Stop playback and network work once metadata is available; the login
@@ -661,7 +712,7 @@ async fn read_video_inner(
             }
         })
         .map_err(|_| "读取网页视频失败。")?;
-    let raw = tokio::time::timeout(Duration::from_secs(5), rx)
+    let raw = tokio::time::timeout(Duration::from_millis(900), rx)
         .await
         .map_err(|_| "读取网页视频超时。")?
         .map_err(|_| "读取网页视频失败。")?;
@@ -738,6 +789,66 @@ pub async fn capture(app: &AppHandle, platform: Platform) -> Result<String, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn default_quality_reuses_only_highest_cached_result_and_unchanged_session_keeps_cache() {
+        let directory =
+            std::env::temp_dir().join(format!("snowdown-cache-{}", uuid::Uuid::new_v4()));
+        let sessions = Sessions::open(directory.clone());
+        let source = sites::recognize("https://www.douyin.com/video/1234567890123456789").unwrap();
+        sessions
+            .save(Platform::Douyin, "sessionid=fixture".into())
+            .unwrap();
+        let value = serde_json::json!({"aweme_detail":{"aweme_id":"1234567890123456789","video":{"width":1280,"height":720,"play_addr":{"url_list":["https://v.fixture.douyinvod.com/video.mp4"]}}}});
+        let mut resolved = sessions.remember_browser(&source, &value, 0).unwrap();
+        assert!(cached_quality(&resolved, 0));
+        assert!(cached_quality(&resolved, 720));
+        assert!(!cached_quality(&resolved, 480));
+        resolved.quality = 480;
+        assert!(!cached_quality(&resolved, 0));
+        let previous = std::fs::read(directory.join("douyin.dat")).unwrap();
+        sessions
+            .save(Platform::Douyin, "sessionid=fixture".into())
+            .unwrap();
+        assert_eq!(sessions.media.lock().unwrap().len(), 1);
+        assert_eq!(
+            previous,
+            std::fs::read(directory.join("douyin.dat")).unwrap()
+        );
+        sessions
+            .save(Platform::Douyin, "sessionid=new-fixture".into())
+            .unwrap();
+        assert!(sessions.media.lock().unwrap().is_empty());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[tokio::test]
+    async fn fast_paths_race_success_not_first_error() {
+        let start = Instant::now();
+        let value = first_success(
+            async {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                Ok::<_, String>(1)
+            },
+            async { Ok(2) },
+        )
+        .await
+        .unwrap();
+        assert_eq!(value, 2);
+        assert!(start.elapsed() < Duration::from_millis(200));
+        assert_eq!(
+            first_success(async { Err("blocked".into()) }, async {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                Ok(3)
+            })
+            .await
+            .unwrap(),
+            3
+        );
+        assert!(
+            first_success::<u8>(async { Err("one".into()) }, async { Err("two".into()) })
+                .await
+                .is_err()
+        );
+    }
     #[test]
     fn restored_cookies_keep_live_values_and_the_platform_script_tokens_visible() {
         let plan = restore_plan(

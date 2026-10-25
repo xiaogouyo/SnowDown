@@ -14,6 +14,7 @@ const FILES: &[&str] = &[
     "background.js",
     "popup.js",
     "job.js",
+    "floating.js",
     "MEDIABUNNY-LICENSE.txt",
     "icons/32.png",
     "icons/128.png",

@@ -95,8 +95,14 @@ pub fn start(app: AppHandle, data: PathBuf) {
             let expired=state.qr_login.check(&app,platform).await?;
             let expired_saved=tokio::fs::read(&saved).await.ok().as_ref()==Some(&original);
             mode.store(2,Ordering::SeqCst);
+            let check_started=std::time::Instant::now();
             let authenticated=state.qr_login.check(&app,platform).await?;
+            let authenticated_ms=check_started.elapsed().as_millis();
+            let cached_started=std::time::Instant::now();
+            let recent=state.qr_login.check(&app,platform).await?;
+            let recent_ms=cached_started.elapsed().as_millis();
             mode.store(3,Ordering::SeqCst);
+            state.qr_login.cancel(&app,platform);
             let before_verification=tokio::fs::read(&saved).await.map_err(|_|"Saved login missing")?;
             let verification=state.qr_login.check(&app,platform).await?;
             let verification_saved=tokio::fs::read(&saved).await.ok().as_ref()==Some(&before_verification);
@@ -118,8 +124,8 @@ pub fn start(app: AppHandle, data: PathBuf) {
                 imported &= live.contains(&format!("{auth}=isolated-import-fixture")) && cookies.iter().any(|c|c.name()==auth&&c.http_only()==Some(true)) && cookies.iter().any(|c|c.name()=="a1"&&c.http_only()==Some(false));
                 state.site_sessions.logout(&app,platform).await?;
             }
-            let success=unknown_ui&&unknown_saved&&restored&&expired.state=="unknown"&&expired_saved&&authenticated.state=="authenticated"&&verification.state=="unknown"&&verification_saved&&logout_cleared&&imported&&clicks.load(Ordering::SeqCst)==0;
-            Ok::<_,String>(json!({"success":success,"initialWebviewHadNoSession":!live_before.contains("web_session="),"unknownUi":unknown_ui,"unknownFileUnchanged":unknown_saved,"savedCookieRestored":restored,"expiredQrState":expired.state,"expiredQrFileUnchanged":expired_saved,"positiveAccountState":authenticated.state,"verificationState":verification.state,"verificationFileUnchanged":verification_saved,"loginButtonClicks":clicks.load(Ordering::SeqCst),"logoutCannotBeUndone":logout_cleared,"bothPlatformImportsAndCookieFlags":imported,"usesOnlyFixtures":true}))
+            let success=unknown_ui&&unknown_saved&&restored&&expired.state=="unknown"&&expired_saved&&authenticated.state=="authenticated"&&verification.state=="unknown"&&verification_saved&&logout_cleared&&imported&&recent.state=="authenticated"&&recent_ms<200&&authenticated_ms<2500&&clicks.load(Ordering::SeqCst)==0;
+            Ok::<_,String>(json!({"success":success,"initialWebviewHadNoSession":!live_before.contains("web_session="),"unknownUi":unknown_ui,"unknownFileUnchanged":unknown_saved,"savedCookieRestored":restored,"expiredQrState":expired.state,"expiredQrFileUnchanged":expired_saved,"positiveAccountState":authenticated.state,"verificationState":verification.state,"verificationFileUnchanged":verification_saved,"loginButtonClicks":clicks.load(Ordering::SeqCst),"logoutCannotBeUndone":logout_cleared,"bothPlatformImportsAndCookieFlags":imported,"usesOnlyFixtures":true,"authenticatedMs":authenticated_ms,"recentCheckMs":recent_ms}))
         }.await;
         let report = match result {
             Ok(value) => value,

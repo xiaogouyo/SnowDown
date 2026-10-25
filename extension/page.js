@@ -1,20 +1,21 @@
 // Executes in the current tab's MAIN world. No form values or arbitrary cookies.
-export async function capturePage(){
+export async function capturePage({resources:includeResources=false,backgrounds=true}={}){
   const url=location.href,host=location.hostname;
-  const platform=host.endsWith('bilibili.com')?'bilibili':host.endsWith('douyin.com')?'douyin':host.endsWith('xiaohongshu.com')?'xiaohongshu':null;
+  const matches=base=>host===base||host.endsWith(`.${base}`);
+  const platform=matches('bilibili.com')?'bilibili':matches('douyin.com')?'douyin':matches('xiaohongshu.com')?'xiaohongshu':null;
   const resources=[];
-  for(const node of document.querySelectorAll('img,video,audio,source')){
+  if(includeResources)for(const node of document.querySelectorAll('img,video,audio,source')){
     const src=node.currentSrc||node.src;if(!/^https?:/.test(src||''))continue;
     resources.push({url:src,kind:node.tagName==='IMG'?'image':node.tagName==='AUDIO'?'audio':'video',width:node.naturalWidth||node.videoWidth||0,height:node.naturalHeight||node.videoHeight||0,name:node.alt||'',mime:node.type||''});
     if(resources.length>=1000)break;
   }
-  for(const entry of performance.getEntriesByType('resource').slice(-1000))resources.push({url:entry.name,...(entry.initiatorType==='img'?{kind:'image'}:{})});
-  for(const node of [...document.querySelectorAll('*')].slice(0,5000)){
+  if(includeResources)for(const entry of performance.getEntriesByType('resource').slice(-1000))resources.push({url:entry.name,...(entry.initiatorType==='img'?{kind:'image'}:{})});
+  if(includeResources&&backgrounds)for(const node of [...document.querySelectorAll('*')].slice(0,5000)){
     const value=getComputedStyle(node).backgroundImage;
     for(const match of value.matchAll(/url\(["']?(https?:[^"')]+)["']?\)/g))resources.push({url:match[1],kind:'image'});
   }
   let id=platform==='douyin'?(new URL(url).searchParams.get('modal_id')||url.match(/\/video\/(\d+)/)?.[1]):platform==='xiaohongshu'?url.match(/\/(?:explore|item)\/([a-f\d]{24})/)?.[1]:url.match(/BV[\w]{10}/)?.[0];
-  const roots=[window.__INITIAL_STATE__,window.__UNIVERSAL_DATA_FOR_REHYDRATION__,window.__snowdownMediaDetails];
+  const roots=[window.__INITIAL_STATE__,window._ROUTER_DATA,window.__UNIVERSAL_DATA_FOR_REHYDRATION__,window.__snowdownMediaDetails];
   for(const script of document.querySelectorAll('script#RENDER_DATA,script#__NEXT_DATA__')){try{roots.push(JSON.parse(decodeURIComponent(script.textContent)))}catch{}}
   let detail=null,seen=new Set(),count=0;
   function find(value,depth=0){if(!value||typeof value!=='object'||seen.has(value)||depth>18||++count>18000)return;seen.add(value);

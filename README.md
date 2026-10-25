@@ -2,12 +2,12 @@
 
 Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红书视频。采用 Tauri 2、Vue 3、TypeScript 与 Rust，下载文件在本机处理和保存。
 
-## 下载 v0.2.3
+## 下载 v0.2.4
 
-- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.3/SnowDown_0.2.3_x64-setup.exe)
-- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.3/SnowDown_0.2.3_Windows_x64_portable.zip)
-- [浏览器插件 v0.1.0](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.3/SnowDown_BrowserExtension_0.1.0.zip)
-- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.3)
+- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.4/SnowDown_0.2.4_x64-setup.exe)
+- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.4/SnowDown_0.2.4_Windows_x64_portable.zip)
+- [浏览器插件 v0.1.1](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.4/SnowDown_BrowserExtension_0.1.1.zip)
+- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.4)
 
 需要 Windows 10/11 x64 和 WebView2 运行时。免安装版请完整解压后启动，保留 `resources` 文件夹。下载文件的 SHA256 校验值随 Release 提供。
 
@@ -40,7 +40,7 @@ Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红�
 - 与顶部栏融为一体的窗口按钮，支持拖动、双击最大化与关闭到托盘。
 - 二次元异形安装界面，透明立绘、曲面面板、安装路径选择与真实安装阶段提示。
 
-浏览器扩展已提供 v0.1.0；Linux和鸿蒙桌面客户端尚未实现。界面组件和站点解析/任务模块已分离，方便后续适配。
+浏览器扩展已提供 v0.1.1；Linux和鸿蒙桌面客户端尚未实现。界面组件和站点解析/任务模块已分离，方便后续适配。
 
 分段下载会验证服务器的 Range、文件长度与资源标识，并核对已保存分段的本地摘要。更新包还会校验官方 SHA256；同一版本可跨镜像续传。服务器不支持安全分段或资源发生变化时会重新下载，避免拼接错误文件。多连接有助于利用带宽，实际速度取决于网络和站点限制。单任务限速由所有连接共同遵守。
 
@@ -48,7 +48,9 @@ v0.2.1 修复小红书检查登录误清会话：检查不会主动打开扫码�
 
 ## 浏览器插件
 
-桌面端左侧新增插件贴片，可检测 Chrome / Edge、准备插件目录并绑定；插件独立版本为 v0.1.0。浏览器首次需开启开发者模式并确认“加载已解压的扩展”，当前未上架商店，不能静默安装。详细的安装、权限、独立下载、桌面联动与隐私说明见 [插件使用说明](extension/README.md)。软件离线时插件自动回退浏览器下载，重新打开后恢复连接。
+v0.2.4 内置插件 v0.1.1：新标签页适配完整窗口，新增右侧视频悬浮球和原位展开的下载设置卡片。提醒可在插件设置关闭；三平台默认支持，其他网页需授权。插件更新后在扩展管理页刷新一次，已有视频页面也可刷新。
+
+桌面端左侧新增插件贴片，可检测 Chrome / Edge、准备插件目录并绑定；插件独立版本为 v0.1.1。浏览器首次需开启开发者模式并确认“加载已解压的扩展”，当前未上架商店，不能静默安装。详细的安装、权限、独立下载、桌面联动与隐私说明见 [插件使用说明](extension/README.md)。软件离线时插件自动回退浏览器下载，重新打开后恢复连接。
 
 v0.2.3 可在插件面板直接“下载 ZIP”，从内置资源离线生成本地安装包；联动安装失败也可使用。解压后在浏览器扩展管理页加载包含 manifest.json 的文件夹。安装教学改为五步图标流程，悬停或键盘聚焦图标可查看提示。上一版动画更新已统一归档为 v0.2.2；此前安装过误标 v0.2.3 动画版的用户，需要手动覆盖安装新 v0.2.3 一次。
 

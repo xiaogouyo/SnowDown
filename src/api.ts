@@ -11,7 +11,7 @@ export async function getSnapshot(): Promise<AppSnapshot> {
     tasks: [],
     settings: { downloadDir: '', concurrency: 2, downloadConnections: 8, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
     siteSessions: [],
-    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.2.3',
+    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.2.4',
   }
   return invoke('get_snapshot')
 }
@@ -105,7 +105,7 @@ export async function browserStatus(): Promise<{id:string;name:string;installed:
 export async function installBrowserExtension(browser:string): Promise<string> { requireDesktop(); return invoke('install_browser_extension',{browser}) }
 export async function saveBrowserExtensionZip(): Promise<string | null> {
   requireDesktop()
-  const path = await save({ title: '保存插件 ZIP', defaultPath: 'SnowDown_BrowserExtension_0.1.0.zip', filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }] })
+  const path = await save({ title: '保存插件 ZIP', defaultPath: 'SnowDown_BrowserExtension_0.1.1.zip', filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }] })
   return path ? invoke('export_browser_extension_zip', { path }) : null
 }
 export async function openUpdateRelease(): Promise<void> { requireDesktop(); await invoke('open_update_release') }

@@ -49,7 +49,7 @@ onUnmounted(() => { disposed = true; unsubscribe?.(); unwatchFocus?.() })
 <template>
   <main ref="root" class="tray-shell" @keydown="onKey" @contextmenu.prevent>
     <section class="tray-card" aria-label="SnowDown 托盘菜单">
-      <header class="tray-brand"><span class="brand-mark"><Snowflake :size="18" /></span><div><strong>SnowDown<span>.</span></strong><small>好内容，慢慢收藏。</small></div><span class="tray-version">v{{ snapshot?.version ?? '0.2.3' }}</span></header>
+      <header class="tray-brand"><span class="brand-mark"><Snowflake :size="18" /></span><div><strong>SnowDown<span>.</span></strong><small>好内容，慢慢收藏。</small></div><span class="tray-version">v{{ snapshot?.version ?? '0.2.4' }}</span></header>
       <nav role="menu" aria-label="托盘操作">
         <button role="menuitem" :disabled="busy" @click="action('show')"><ArrowUpRight :size="17" /><span>打开 SnowDown</span></button>
         <button role="menuitem" :disabled="busy" @click="action('folder')"><FolderOpen :size="17" /><span>打开下载目录</span></button>

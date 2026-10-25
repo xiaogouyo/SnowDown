@@ -40,7 +40,7 @@ onUnmounted(() => { disposed = true; clearInterval(timer) })
       <section class="modal extension-modal" role="dialog" aria-modal="true" aria-labelledby="extension-title">
         <div class="modal-header"><div><span class="eyebrow">SNOWDOWN FOR YOUR BROWSER</span><h2 id="extension-title">连接你的浏览器</h2></div><button class="icon-button" aria-label="关闭插件设置" @click="close"><X :size="19" /></button></div>
         <div class="extension-body">
-          <p class="extension-intro">视频、图像一处收藏。插件 v0.1.0 可独立使用，也可将下载交给桌面端。</p>
+          <p class="extension-intro">视频、图像一处收藏。插件 v0.1.1 可独立使用，也可将下载交给桌面端。</p>
           <div v-for="browser in browsers" :key="browser.id" class="browser-choice">
             <div><strong>{{ browser.name }}</strong><small><Check v-if="browser.connected" :size="12" />{{ browser.connected ? '已连接 SnowDown' : browser.installed ? '已检测到浏览器' : '未安装' }}</small></div>
             <button class="button" :class="browser.connected ? 'secondary' : 'primary'" :disabled="busy" @click="install(browser.id)">{{ browser.installed ? browser.connected ? '管理插件' : '安装插件' : '下载浏览器' }}</button>

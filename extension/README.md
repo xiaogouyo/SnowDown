@@ -1,16 +1,22 @@
-# SnowDown 浏览器插件 v0.1.0
+# SnowDown 浏览器插件 v0.1.1
 
-支持 Google Chrome / Microsoft Edge（Chromium 116 或更新版本）。这是 Manifest V3 插件，可独立下载，也可连接 Windows 桌面版 SnowDown v0.2.0。
+支持 Google Chrome / Microsoft Edge（Chromium 116 或更新版本）。这是 Manifest V3 插件，可独立下载，也可连接 Windows 桌面版 SnowDown v0.2.4。
 
 ## 安装
 
 推荐从桌面软件左侧“浏览器插件”贴片选择浏览器。软件会准备稳定的插件目录、注册当前用户的原生消息通道、打开扩展管理页与文件夹。开启开发者模式，选择“加载已解压的扩展”，选择软件显示的目录即可。首次连接默认启用桌面转发和账号同步，可在插件设置中关闭。
 
-独立使用：下载 `SnowDown_BrowserExtension_0.1.0.zip` 并完整解压。在 `chrome://extensions` 或 `edge://extensions` 开启开发者模式，加载包含 `manifest.json` 的文件夹。固定工具栏 SnowDown 图标。
+独立使用：下载 `SnowDown_BrowserExtension_0.1.1.zip` 并完整解压。在 `chrome://extensions` 或 `edge://extensions` 开启开发者模式，加载包含 `manifest.json` 的文件夹。固定工具栏 SnowDown 图标。
 
 普通 Windows 用户不能由软件静默安装未上架的扩展。当前未上架扩展商店，最后的浏览器加载确认需用户完成；不设置企业强制安装策略，不修改用户浏览器的 Preferences 或 Secure Preferences。官方说明：[Chrome](https://developer.chrome.com/docs/extensions/how-to/distribute/install-extensions)、[Edge](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-manage-extensions-webstore)。
 
 ## 使用
+
+v0.1.1 的“在新标签页打开”采用完整窗口布局，工具栏弹窗保留紧凑圆角界面。打开支持的视频页面并出现可见视频后，网页右侧会挤压弹出下载悬浮球；点击后球体展开为下载设置卡片，可选画质、跟随插件下载设置或本次使用浏览器下载。卡片可收起为球体。
+
+在偏好设置关闭“视频悬浮球提醒”，或在卡片内点击“关闭悬浮提醒”，会隐藏已打开页面的提醒，并记住该选择。三平台默认注入，其他网页需要先在资源模式批准站点权限；已有页面可刷新后使用。不会在浏览器内部页面、未授权网页或没有可见视频时任意弹出提醒。
+
+从桌面软件安装／更新解压目录后，请在浏览器扩展管理页刷新 SnowDown 插件，再刷新已有视频页。v0.1.1 保持原稳定插件 ID 和已保存的偏好。
 
 打开B站、抖音或小红书的目标视频，点击插件图标，再点“读取当前视频”。浏览器中已有的账号会话直接用于解析。抖音和小红书需先播放视频，安装后的已有标签页可刷新一次，使插件观察到视频详情。选择画质后下载。
 

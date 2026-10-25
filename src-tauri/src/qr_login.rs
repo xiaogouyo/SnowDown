@@ -6,7 +6,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Manager};
 
@@ -68,7 +68,7 @@ impl CheckEvidence {
         } else {
             0
         };
-        self.confirmed >= 2 && elapsed >= Duration::from_secs(3)
+        self.confirmed >= 2 && elapsed >= Duration::from_millis(700)
     }
 }
 
@@ -95,6 +95,7 @@ struct Inner {
 #[derive(Default)]
 pub struct QrLogin {
     inner: Mutex<Inner>,
+    checked: Mutex<std::collections::HashMap<Platform, (String, Instant)>>,
 }
 
 fn valid_image(image: &str) -> bool {
@@ -161,10 +162,17 @@ async fn frame(app: &AppHandle, platform: Platform, check_only: bool) -> Result<
             }
         })
         .map_err(|_| "官方二维码读取失败。")?;
-    let raw = tokio::time::timeout(Duration::from_secs(3), receiver)
-        .await
-        .map_err(|_| "读取二维码超时。")?
-        .map_err(|_| "读取二维码失败。")?;
+    let raw = tokio::time::timeout(
+        if check_only {
+            Duration::from_millis(800)
+        } else {
+            Duration::from_secs(3)
+        },
+        receiver,
+    )
+    .await
+    .map_err(|_| "读取二维码超时。")?
+    .map_err(|_| "读取二维码失败。")?;
     if raw.len() > 2 * 1024 * 1024 {
         return Err("二维码数据过大。".into());
     }
@@ -183,6 +191,7 @@ impl QrLogin {
         self.inner.lock().unwrap().generation == generation
     }
     pub fn cancel(&self, app: &AppHandle, platform: Platform) {
+        self.checked.lock().unwrap().remove(&platform);
         let mut inner = self.inner.lock().unwrap();
         if inner.platform.is_some_and(|active| active != platform) {
             return;
@@ -234,6 +243,7 @@ impl QrLogin {
         Ok(())
     }
     pub async fn begin(&self, app: &AppHandle, platform: Platform) -> Result<LoginQr, String> {
+        self.checked.lock().unwrap().remove(&platform);
         let generation = {
             let mut inner = self.inner.lock().unwrap();
             inner.generation += 1;
@@ -362,6 +372,20 @@ impl QrLogin {
     }
 
     pub async fn check(&self, app: &AppHandle, platform: Platform) -> Result<LoginCheck, String> {
+        let state = app.state::<Arc<AppState>>();
+        let saved = state.site_sessions.cookie(platform);
+        if !saved.is_empty()
+            && self
+                .checked
+                .lock()
+                .unwrap()
+                .get(&platform)
+                .is_some_and(|(cookie, time)| {
+                    cookie == &saved && time.elapsed() < Duration::from_secs(20)
+                })
+        {
+            return Ok(LoginCheck::new("authenticated", "最近已确认登录有效。"));
+        }
         self.cancel(app, platform);
         let generation = {
             let mut inner = self.inner.lock().unwrap();
@@ -370,10 +394,22 @@ impl QrLogin {
             inner.pending = None;
             inner.generation
         };
-        let state = app.state::<Arc<AppState>>();
         // Serialize checks with profile clearing so a cancelled check cannot put
         // cookies back after an explicit logout.
-        let _profile = state.site_sessions.checking_guard(platform).await?;
+        let _profile = match tokio::time::timeout(
+            Duration::from_millis(350),
+            state.site_sessions.checking_guard(platform),
+        )
+        .await
+        {
+            Ok(value) => value?,
+            Err(_) => {
+                return Ok(LoginCheck::new(
+                    "unknown",
+                    "平台正在解析视频或处理账号，请稍后检查；原有会话已保留。",
+                ))
+            }
+        };
         if !self.current(generation) {
             return Err("登录检查已取消。".into());
         }
@@ -394,14 +430,14 @@ impl QrLogin {
             .navigate(platform.home().parse().unwrap())
             .map_err(|_| "无法检查平台登录状态。")?;
         let result = async {
-            let deadline = tokio::time::Instant::now() + Duration::from_secs(18);
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(7);
             let started = tokio::time::Instant::now();
             let mut evidence=CheckEvidence::default();
-            for _ in 0..25 {
+            for _ in 0..32 {
                 if tokio::time::Instant::now() >= deadline {
                     break;
                 }
-                tokio::time::sleep(Duration::from_millis(600)).await;
+                tokio::time::sleep(Duration::from_millis(150)).await;
                 if !self.current(generation) {
                     return Err("登录检查已取消。".into());
                 }
@@ -411,6 +447,7 @@ impl QrLogin {
                 };
                 if evidence.observe(&value.state,started.elapsed()) {
                     self.complete(app, platform, generation).await?;
+                    self.checked.lock().unwrap().insert(platform,(state.site_sessions.cookie(platform),Instant::now()));
                     return Ok(LoginCheck::new("authenticated","登录状态有效。"));
                 }
                 if value.state == "verification" {
@@ -442,8 +479,8 @@ mod tests {
         ] {
             assert!(!evidence.observe(state, Duration::from_secs(10)));
         }
-        assert!(!evidence.observe("confirmed", Duration::from_secs(1)));
-        assert!(!evidence.observe("confirmed", Duration::from_secs(2)));
+        assert!(!evidence.observe("confirmed", Duration::from_millis(100)));
+        assert!(!evidence.observe("confirmed", Duration::from_millis(300)));
         assert!(!evidence.observe("loading", Duration::from_secs(4)));
         assert!(!evidence.observe("confirmed", Duration::from_secs(5)));
         assert!(evidence.observe("confirmed", Duration::from_secs(6)));
