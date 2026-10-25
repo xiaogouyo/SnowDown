@@ -1,6 +1,6 @@
 # 平台范围与使用方式
 
-v0.2.8 桌面与 v0.1.4 插件共用 `shared/platforms.json`。目录参考 [DataTool 公开首页](https://www.datatool.vip/zh)和[公开问答](https://www.datatool.vip/downloader/faq/en)，不使用其专有插件代码。站点名称进入目录表示可以识别并尝试解析，不表示每一种页面、账号或媒体格式都可下载。
+自 v0.2.8 桌面与 v0.1.4 插件开始共用 `shared/platforms.json`，v0.2.9 / v0.1.5 延续相同目录。目录参考 [DataTool 公开首页](https://www.datatool.vip/zh)和[公开问答](https://www.datatool.vip/downloader/faq/en)，不使用其专有插件代码。站点名称进入目录表示可以识别并尝试解析，不表示每一种页面、账号或媒体格式都可下载。
 
 B站、抖音、小红书沿用专用解析和扫码账号管理。其余站点使用浏览器已加载媒体识别、页面预览链接读取及桌面独立 [yt-dlp](https://github.com/yt-dlp/yt-dlp) 解析。桌面与插件使用相同目录；无法从网页取得可下载媒体时，已连接的桌面端会尝试其对应提取器。部分平台需要先在浏览器登录、播放并允许站点访问。
 

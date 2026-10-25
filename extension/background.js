@@ -3,6 +3,7 @@ import {linkedPageMedia} from './linked-page.js';
 import {genericVideo,downloadRows} from './media.js';
 import {expandManifests} from './manifests.js';
 import {siteOf,previewUrl} from './catalog.js';
+import {douyinPreviewTargets} from './douyin-preview.js';
 import {parseVideo} from './sites.js';
 import {platformOf,platformNames,sessionPlatforms,normalizeResources,safeUrl,safeName,repository,resourceKind} from './core.js';
 import {contentSender,currentTicket,supportedVideoUrl} from './floating-core.js';
@@ -70,7 +71,7 @@ chrome.runtime.onMessage.addListener((message,sender,sendResponse)=>{
  // Content scripts only operate on the sender's own top-level tab. They never
  // supply cookies, native methods, arbitrary media URLs or another tab's id.
  if(!ownPage){
-  if(!contentSender(sender,chrome.runtime.id)||!['float-state','float-parse','float-download','float-disable','preview-parse','preview-download'].includes(message.type))return;
+  if(!contentSender(sender,chrome.runtime.id)||!['float-state','float-parse','float-download','float-disable','preview-targets','preview-parse','preview-download'].includes(message.type))return;
   floatingRequest(message,sender).then(data=>sendResponse({ok:true,data}),error=>sendResponse({ok:false,error:error.message||'无法读取视频'}));return true;
  }
  (async()=>{
@@ -86,15 +87,19 @@ chrome.runtime.onMessage.addListener((message,sender,sendResponse)=>{
   }
  })().then(data=>sendResponse({ok:true,data}),error=>sendResponse({ok:false,error:error.message||'操作未完成，请重试。'}));return true;
 });
+function canonicalDouyin(input){const url=new URL(input);const id=url.pathname.match(/^\/video\/(\d{8,24})(?:\/|$)/)?.[1]||url.searchParams.get('modal_id')||url.searchParams.get('aweme_id')||url.searchParams.get('vid');return /^\d{8,24}$/.test(id||'')?`https://www.douyin.com/video/${id}`:null;}
+async function douyinTargets(tabId){return (await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:douyinPreviewTargets}))[0]?.result||[];}
 async function floatingRequest(message,sender){
  if(message.type==='float-disable'){await chrome.storage.local.set({floatingEnabled:false});return {enabled:false}}
  const settings=await prefs();if(!settings.floatingEnabled)throw Error('悬浮球提醒已关闭，可在插件设置重新开启。');
  if(message.type==='float-state')return {enabled:true,platform:platformNames[platformOf(sender.url)]||null,supported:supportedVideoUrl(sender.url)};
+ if(message.type==='preview-targets')return siteOf(sender.url)?.id==='douyin'?await douyinTargets(sender.tab.id):[];
  if(message.type==='preview-parse'){
   const target=previewUrl(message.url,sender.url);if(!target||siteOf(target)?.id!==siteOf(sender.url)?.id)throw Error('预览视频链接无效。');
   const check=(await chrome.scripting.executeScript({target:{tabId:sender.tab.id},world:'MAIN',func:url=>{const a=[...document.querySelectorAll('a[href]')].find(a=>a.href.split('#')[0]===url);if(!a)return null;const r=a.getBoundingClientRect();if(r.width<60||r.height<30||r.bottom<0||r.top>innerHeight)return null;const image=a.querySelector('img');return {title:a.title||image?.alt||a.textContent.trim().slice(0,200),cover:image?.currentSrc||image?.src||''}},args:[target]}))[0]?.result;
-  if(!check&&target!==sender.url)throw Error('预览卡片已变化，请重新读取。');
-  const {page,video}=await resolvePage(sender.tab.id,target,check);const id=crypto.randomUUID();
+  const douyin=siteOf(target)?.id==='douyin'?(await douyinTargets(sender.tab.id)).find(item=>item.url===canonicalDouyin(target)):null;
+  if(!check&&!douyin&&target!==sender.url)throw Error('预览卡片已变化，请重新读取。');
+  const {page,video}=await resolvePage(sender.tab.id,target,check||douyin);const id=crypto.randomUUID();
   for(const [key,value]of floatTickets)if(Date.now()-value.createdAt>120000)floatTickets.delete(key);if(floatTickets.size>64)floatTickets.delete(floatTickets.keys().next().value);
   floatTickets.set(id,{tabId:sender.tab.id,url:sender.url,sourceUrl:target,createdAt:Date.now(),page,video,preview:true});
   return {id,title:video.title,rows:downloadRows(video),connected,desktop:(await prefs()).preferDesktop&&connected};
@@ -115,7 +120,7 @@ async function floatingRequest(message,sender){
  if(!Number.isInteger(message.index)||!ticket.video.streams[message.index])throw Error('请选择有效画质。');
  const current=await chrome.tabs.get(sender.tab.id);if(current.url!==ticket.url)throw Error('页面已切换，请重新读取。');
  if(message.type==='preview-download'&&!ticket.preview)throw Error('预览下载已失效。');
- if(ticket.preview&&ticket.sourceUrl!==sender.url){const present=(await chrome.scripting.executeScript({target:{tabId:sender.tab.id},world:'MAIN',func:url=>[...document.querySelectorAll('a[href]')].some(a=>a.href.split('#')[0]===url),args:[ticket.sourceUrl]}))[0]?.result;if(!present)throw Error('预览卡片已切换，请重新读取。');}
+ if(ticket.preview&&ticket.sourceUrl!==sender.url){let present=(await chrome.scripting.executeScript({target:{tabId:sender.tab.id},world:'MAIN',func:url=>[...document.querySelectorAll('a[href]')].some(a=>a.href.split('#')[0]===url),args:[ticket.sourceUrl]}))[0]?.result;if(!present&&siteOf(ticket.sourceUrl)?.id==='douyin')present=(await douyinTargets(sender.tab.id)).some(item=>item.url===canonicalDouyin(ticket.sourceUrl));if(!present)throw Error('预览卡片已切换，请重新读取。');}
  if(message.type==='preview-download'&&message.kind==='image'){
   const cover=safeUrl(ticket.video.cover);if(!cover)throw Error('没有可下载封面。');const result=await download({resource:{url:cover,kind:'image',name:safeName(ticket.video.title)+'.'+(cover.split(/[?#]/)[0].match(/\.(jpg|jpeg|png|webp|avif)$/i)?.[1]||'jpg')},browserOnly:true});floatTickets.delete(message.id);return result;
  }

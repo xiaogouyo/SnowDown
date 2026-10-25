@@ -45,7 +45,8 @@ export function capturePage({resources:includeResources=false,backgrounds=true,t
   // bounded React props adjacent to the player; return only the exact video's fields.
   if(platform==='douyin'&&!detail&&id){
     seen=new Set();count=0;
-    for(const video of [...document.querySelectorAll('video')].slice(0,12)){
+    const candidates=[...[...document.querySelectorAll('video')].slice(0,12),...[...document.querySelectorAll('img,[data-e2e="video-card"],[data-aweme-id],[data-video-id],[style*="background-image"]')].slice(0,1200).filter(node=>{const r=node.getBoundingClientRect();return r.width>=100&&r.height>=70&&r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth}).slice(0,64)];
+    for(const video of candidates){
       for(let node=video,level=0;node&&level<12&&!detail;node=node.parentElement,level++){
         for(const key of Object.keys(node).filter(key=>/^__react(?:Props|Fiber)\$/.test(key))){
           let value;try{value=node[key]}catch{continue}

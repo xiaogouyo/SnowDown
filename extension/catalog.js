@@ -3,7 +3,7 @@ export {sites};
 export function siteOf(input){try{const url=new URL(input);if(!['https:','http:'].includes(url.protocol)||url.username||url.password)return null;return sites.find(site=>site.hosts.some(host=>url.hostname===host||url.hostname.endsWith('.'+host)))||null}catch{return null}}
 export function previewUrl(input,base){try{const url=new URL(input,base),site=siteOf(url.href);if(!site||url.username||url.password||url.port)return null;
  if(site.id==='bilibili'&&!/\/video\/(?:BV[\w]{10}|av\d+)/.test(url.pathname))return null;
- if(site.id==='douyin'&&!/\/video\/\d{8,24}/.test(url.pathname)&&!/^\d{8,24}$/.test(url.searchParams.get('modal_id')||''))return null;
+ if(site.id==='douyin'){const id=url.pathname.match(/^\/video\/(\d{8,24})(?:\/|$)/)?.[1]||['modal_id','aweme_id','vid'].map(key=>url.searchParams.get(key)).find(value=>/^\d{8,24}$/.test(value||''));return id?`https://www.douyin.com/video/${id}`:null;}
  if(site.id==='xiaohongshu'&&!/\/(?:explore|discovery\/item)\/[a-f\d]{24}/i.test(url.pathname))return null;
  if(site.id==='youtube'&&!((url.pathname==='/watch'&&url.searchParams.has('v'))||/^\/(?:shorts|live)\/[\w-]+/.test(url.pathname)||url.hostname==='youtu.be'&&url.pathname.length>2))return null;
  if(site.id==='twitter'&&!/\/status\/\d+/.test(url.pathname))return null;
