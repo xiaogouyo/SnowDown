@@ -32,6 +32,25 @@ pub fn host_matches(host: &str, base: &str) -> bool {
     host == base || host.ends_with(&format!(".{base}"))
 }
 
+#[derive(serde::Deserialize)]
+pub struct CatalogSite {
+    pub id: String,
+    pub label: String,
+    pub hosts: Vec<String>,
+}
+pub fn catalog() -> &'static Vec<CatalogSite> {
+    static CATALOG: OnceLock<Vec<CatalogSite>> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        serde_json::from_str(include_str!("../../shared/platforms.json"))
+            .expect("bundled site catalog")
+    })
+}
+pub fn catalog_site(host: &str) -> Option<&'static CatalogSite> {
+    catalog()
+        .iter()
+        .find(|site| site.hosts.iter().any(|base| host_matches(host, base)))
+}
+
 pub fn source_host(host: &str) -> Option<Platform> {
     if host_matches(host, "bilibili.com") || host == "b23.tv" {
         Some(Platform::Bilibili)
@@ -42,6 +61,8 @@ pub fn source_host(host: &str) -> Option<Platform> {
         || host.ends_with(".xhslink.com")
     {
         Some(Platform::Xiaohongshu)
+    } else if catalog_site(host).is_some() {
+        Some(Platform::Web)
     } else {
         None
     }
@@ -143,7 +164,12 @@ pub fn recognize(input: &str) -> Result<Source, String> {
         }
         return Ok(Source {
             platform,
-            url: url.to_string(),
+            url: {
+                if platform == Platform::Web {
+                    crate::resource_download::validate(url.as_str())?;
+                }
+                url.to_string()
+            },
         });
     }
     Err("请粘贴B站、抖音或小红书的视频链接，也支持带文字的分享内容。".into())
@@ -255,7 +281,7 @@ pub async fn resolve(source: &Source, quality: u32, cookie: &str) -> Result<Reso
             let state = extract_state(&html, "window.__INITIAL_STATE__")?;
             parse_xhs(&state, &id)?
         }
-        Platform::Bilibili => return Err("B站使用专用解析器。".into()),
+        Platform::Bilibili | Platform::Web => return Err("此平台使用专用解析器。".into()),
     };
     let mut resolved = build_resolved(&canonical, &id, metadata, quality)?;
     resolved.audio_url = audio_url;
@@ -316,6 +342,10 @@ fn build_resolved(
 }
 
 pub fn video_id(source: &Source) -> Result<String, String> {
+    if source.platform == Platform::Web {
+        use sha2::Digest;
+        return Ok(format!("{:x}", sha2::Sha256::digest(source.url.as_bytes()))[..24].to_string());
+    }
     Url::parse(&source.url)
         .ok()
         .and_then(|u| {

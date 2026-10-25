@@ -251,9 +251,18 @@ impl Sessions {
             }
             *visited += 1;
             let matches_id = value["aweme_id"].as_str() == Some(id)
-                || value["aweme_id"].as_u64().is_some_and(|number| number.to_string() == id);
-            if matches_id && value["video"].is_object()
-                && sites::from_detail(source, &serde_json::json!({"aweme_detail":{"aweme_id":id,"video":value["video"]}}), 0).is_ok() {
+                || value["aweme_id"]
+                    .as_u64()
+                    .is_some_and(|number| number.to_string() == id);
+            if matches_id
+                && value["video"].is_object()
+                && sites::from_detail(
+                    source,
+                    &serde_json::json!({"aweme_detail":{"aweme_id":id,"video":value["video"]}}),
+                    0,
+                )
+                .is_ok()
+            {
                 return Some(value);
             }
             match value {
@@ -554,7 +563,7 @@ impl Sessions {
         let index = match source.platform {
             Platform::Douyin => 0,
             Platform::Xiaohongshu => 1,
-            Platform::Bilibili => return Err("B站使用专用解析器。".into()),
+            Platform::Bilibili | Platform::Web => return Err("此平台使用专用解析器。".into()),
         };
         // A single page per platform shares its login profile. Serialize page
         // navigation so concurrent queue items cannot replace each other's source.

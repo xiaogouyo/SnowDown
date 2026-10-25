@@ -409,6 +409,13 @@ async fn dispatch(app: &AppHandle, state: &AppState, request: &Value) -> Result<
         return Err("正在安装更新，请稍后重试。".into());
     }
     match request["method"].as_str() {
+        Some("inspect") => {
+            let source = crate::sites::recognize(request["url"].as_str().ok_or("视频链接无效。")?)?;
+            let video = crate::inspect_source(app, state, &source).await?;
+            Ok(
+                json!({"title":video.title,"cover":video.cover,"author":video.author,"duration":video.duration,"streams":video.qualities.iter().map(|q|json!({"quality":q.id,"label":q.label,"width":q.width,"height":q.height,"native":true})).collect::<Vec<_>>() }),
+            )
+        }
         Some("resource") => {
             crate::resource_download::enqueue(
                 app,
@@ -470,20 +477,29 @@ async fn dispatch(app: &AppHandle, state: &AppState, request: &Value) -> Result<
                 .unwrap_or(0)
                 .min(u32::MAX as u64) as u32;
             // Browser details are accepted only after the regular site/CDN validation.
-            let browser_video = if source.platform != Platform::Bilibili {
-                request
-                    .get("detail")
-                    .filter(|d| d.is_object())
-                    .map(|detail| {
-                        state
-                            .site_sessions
-                            .remember_browser(&source, detail, requested)
-                    })
-                    .transpose()?
-            } else {
-                None
-            };
-            let video = if let Some(resolved) = &browser_video {
+            let web_video =
+                if source.platform == Platform::Web && request["detail"]["webMedia"].is_object() {
+                    Some(state.extractor.capture(&source, &request["detail"])?)
+                } else {
+                    None
+                };
+            let browser_video =
+                if matches!(source.platform, Platform::Douyin | Platform::Xiaohongshu) {
+                    request
+                        .get("detail")
+                        .filter(|d| d.is_object())
+                        .map(|detail| {
+                            state
+                                .site_sessions
+                                .remember_browser(&source, detail, requested)
+                        })
+                        .transpose()?
+                } else {
+                    None
+                };
+            let video = if let Some(video) = web_video {
+                video
+            } else if let Some(resolved) = &browser_video {
                 resolved.info.clone()
             } else {
                 crate::inspect_source(app, state, &source).await?
@@ -506,7 +522,11 @@ async fn dispatch(app: &AppHandle, state: &AppState, request: &Value) -> Result<
                 vec![CreateTaskRequest {
                     page_cids: vec![video.selected_cid],
                     quality,
-                    format: OutputFormat::Video,
+                    format: if request["format"] == "audio" {
+                        OutputFormat::Audio
+                    } else {
+                        OutputFormat::Video
+                    },
                     video,
                 }],
                 BatchOptions {

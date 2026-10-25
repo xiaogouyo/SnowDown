@@ -61,7 +61,12 @@ pub fn start_scheduler(app: AppHandle, state: Arc<AppState>) {
                     cancel
                 };
                 state.emit(&app);
-                state.notifications.show(&app, format!("start:{}", task.id), "开始下载", &task.title);
+                state.notifications.show(
+                    &app,
+                    format!("start:{}", task.id),
+                    "开始下载",
+                    &task.title,
+                );
                 let job_state = state.clone();
                 let job_app = app.clone();
                 tauri::async_runtime::spawn(async move {
@@ -192,6 +197,9 @@ async fn run_task(
     check_cancel(cancel)?;
     if task.resource.is_some() {
         return crate::resource_download::run(app, state, task, cancel).await;
+    }
+    if task.platform == Platform::Web {
+        return crate::web_extractor::run(app, state, task, cancel).await;
     }
     let ffmpeg = state
         .ffmpeg

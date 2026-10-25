@@ -1,7 +1,12 @@
 import type { Platform, SourceLink } from './types'
+import sites from '../shared/platforms.json'
 
-export const platformLabels: Record<Platform, string> = { bilibili: 'B站', douyin: '抖音', xiaohongshu: '小红书' }
+export const platformLabels: Record<Platform, string> = { bilibili: 'B站', douyin: '抖音', xiaohongshu: '小红书', web: '网页视频' }
 const matches = (host: string, base: string) => host === base || host.endsWith(`.${base}`)
+export function sourceLabel(source: {platform: Platform; url?: string; sourceUrl?: string}): string {
+  if(source.platform !== 'web') return platformLabels[source.platform]
+  try { const host=new URL(source.url||source.sourceUrl||'').hostname;return sites.find(site=>site.hosts.some(base=>matches(host,base)))?.label||platformLabels.web } catch {return platformLabels.web}
+}
 
 export function identifySource(text: string): SourceLink | null {
   const bare = text.trim()
@@ -32,6 +37,7 @@ export function identifySource(text: string): SourceLink | null {
         for (const key of ['xsec_token', 'xsec_source']) { const value = url.searchParams.get(key); if (value) canonical.searchParams.set(key, value) }
         return { platform: 'xiaohongshu', url: canonical.toString() }
       }
+      if (sites.some(site => !['bilibili','douyin','xiaohongshu'].includes(site.id) && site.hosts.some(base => matches(host,base)))) return {platform:'web',url:url.toString()}
     } catch { /* Ignore text that is not a supported URL. */ }
   }
   return null

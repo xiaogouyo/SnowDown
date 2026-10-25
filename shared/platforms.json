@@ -1,0 +1,373 @@
+[
+  {
+    "id": "tiktok",
+    "label": "TikTok",
+    "hosts": [
+      "tiktok.com"
+    ]
+  },
+  {
+    "id": "douyin",
+    "label": "抖音",
+    "hosts": [
+      "douyin.com",
+      "iesdouyin.com"
+    ]
+  },
+  {
+    "id": "instagram",
+    "label": "Instagram",
+    "hosts": [
+      "instagram.com"
+    ]
+  },
+  {
+    "id": "twitter",
+    "label": "X / Twitter",
+    "hosts": [
+      "twitter.com",
+      "x.com"
+    ]
+  },
+  {
+    "id": "facebook",
+    "label": "Facebook",
+    "hosts": [
+      "facebook.com",
+      "fb.watch"
+    ]
+  },
+  {
+    "id": "reddit",
+    "label": "Reddit",
+    "hosts": [
+      "reddit.com",
+      "redd.it"
+    ]
+  },
+  {
+    "id": "vk",
+    "label": "VK",
+    "hosts": [
+      "vk.com",
+      "vkvideo.ru"
+    ]
+  },
+  {
+    "id": "vimeo",
+    "label": "Vimeo",
+    "hosts": [
+      "vimeo.com"
+    ]
+  },
+  {
+    "id": "threads",
+    "label": "Threads",
+    "hosts": [
+      "threads.net",
+      "threads.com"
+    ]
+  },
+  {
+    "id": "dailymotion",
+    "label": "Dailymotion",
+    "hosts": [
+      "dailymotion.com",
+      "dai.ly"
+    ]
+  },
+  {
+    "id": "soundcloud",
+    "label": "SoundCloud",
+    "hosts": [
+      "soundcloud.com"
+    ]
+  },
+  {
+    "id": "pinterest",
+    "label": "Pinterest",
+    "hosts": [
+      "pinterest.com",
+      "pin.it"
+    ]
+  },
+  {
+    "id": "snapchat",
+    "label": "Snapchat",
+    "hosts": [
+      "snapchat.com"
+    ]
+  },
+  {
+    "id": "weibo",
+    "label": "微博",
+    "hosts": [
+      "weibo.com",
+      "weibo.cn"
+    ]
+  },
+  {
+    "id": "ixigua",
+    "label": "西瓜视频",
+    "hosts": [
+      "ixigua.com"
+    ]
+  },
+  {
+    "id": "weishi",
+    "label": "微视",
+    "hosts": [
+      "weishi.com",
+      "weishi.qq.com"
+    ]
+  },
+  {
+    "id": "autohome",
+    "label": "汽车之家",
+    "hosts": [
+      "autohome.com",
+      "autohome.com.cn"
+    ]
+  },
+  {
+    "id": "pipix",
+    "label": "皮皮虾",
+    "hosts": [
+      "pipix.com"
+    ]
+  },
+  {
+    "id": "meipai",
+    "label": "美拍",
+    "hosts": [
+      "meipai.com"
+    ]
+  },
+  {
+    "id": "kuaishou",
+    "label": "快手",
+    "hosts": [
+      "kuaishou.com",
+      "gifshow.com"
+    ]
+  },
+  {
+    "id": "bilibili",
+    "label": "B站",
+    "hosts": [
+      "bilibili.com",
+      "b23.tv"
+    ]
+  },
+  {
+    "id": "amazon",
+    "label": "Amazon",
+    "hosts": [
+      "amazon.com"
+    ]
+  },
+  {
+    "id": "kwai",
+    "label": "Kwai",
+    "hosts": [
+      "kwai.com"
+    ]
+  },
+  {
+    "id": "jimeng",
+    "label": "即梦",
+    "hosts": [
+      "jimeng-ai.org",
+      "jimeng.jianying.com"
+    ]
+  },
+  {
+    "id": "likee",
+    "label": "Likee",
+    "hosts": [
+      "likee.video"
+    ]
+  },
+  {
+    "id": "triller",
+    "label": "Triller",
+    "hosts": [
+      "triller.co"
+    ]
+  },
+  {
+    "id": "killsometime",
+    "label": "KillSomeTime",
+    "hosts": [
+      "killsometime.com"
+    ]
+  },
+  {
+    "id": "vidlii",
+    "label": "VidLii",
+    "hosts": [
+      "vidlii.com"
+    ]
+  },
+  {
+    "id": "archive",
+    "label": "Internet Archive",
+    "hosts": [
+      "archive.org"
+    ]
+  },
+  {
+    "id": "haokan",
+    "label": "好看视频",
+    "hosts": [
+      "haokan.baidu.com",
+      "haokan.com"
+    ]
+  },
+  {
+    "id": "imdb",
+    "label": "IMDb",
+    "hosts": [
+      "imdb.com"
+    ]
+  },
+  {
+    "id": "steam",
+    "label": "Steam",
+    "hosts": [
+      "store.steampowered.com",
+      "steamcommunity.com",
+      "store.steamchina.com"
+    ]
+  },
+  {
+    "id": "behance",
+    "label": "Behance",
+    "hosts": [
+      "behance.net"
+    ]
+  },
+  {
+    "id": "acfun",
+    "label": "AcFun",
+    "hosts": [
+      "acfun.cn"
+    ]
+  },
+  {
+    "id": "soop",
+    "label": "SOOP",
+    "hosts": [
+      "sooplive.com",
+      "sooplive.co.kr",
+      "afreecatv.com"
+    ]
+  },
+  {
+    "id": "plex",
+    "label": "Plex",
+    "hosts": [
+      "plex.tv"
+    ]
+  },
+  {
+    "id": "wechat",
+    "label": "微信公众号",
+    "hosts": [
+      "mp.weixin.qq.com"
+    ]
+  },
+  {
+    "id": "pixabay",
+    "label": "Pixabay",
+    "hosts": [
+      "pixabay.com"
+    ]
+  },
+  {
+    "id": "sharechat",
+    "label": "ShareChat",
+    "hosts": [
+      "sharechat.com"
+    ]
+  },
+  {
+    "id": "ted",
+    "label": "TED",
+    "hosts": [
+      "ted.com"
+    ]
+  },
+  {
+    "id": "rumble",
+    "label": "Rumble",
+    "hosts": [
+      "rumble.com"
+    ]
+  },
+  {
+    "id": "ok",
+    "label": "OK.ru",
+    "hosts": [
+      "ok.ru"
+    ]
+  },
+  {
+    "id": "izlesene",
+    "label": "Izlesene",
+    "hosts": [
+      "izlesene.com"
+    ]
+  },
+  {
+    "id": "imgur",
+    "label": "Imgur",
+    "hosts": [
+      "imgur.com"
+    ]
+  },
+  {
+    "id": "9gag",
+    "label": "9GAG",
+    "hosts": [
+      "9gag.com"
+    ]
+  },
+  {
+    "id": "abcnews",
+    "label": "ABC News",
+    "hosts": [
+      "abcnews.go.com"
+    ]
+  },
+  {
+    "id": "xinpianchang",
+    "label": "新片场",
+    "hosts": [
+      "xinpianchang.com"
+    ]
+  },
+  {
+    "id": "youtube",
+    "label": "YouTube",
+    "hosts": [
+      "youtube.com",
+      "youtu.be"
+    ]
+  },
+  {
+    "id": "xiaohongshu",
+    "label": "小红书",
+    "hosts": [
+      "xiaohongshu.com",
+      "xhslink.com"
+    ]
+  },
+  {
+    "id": "onlyfans",
+    "label": "OnlyFans",
+    "hosts": [
+      "onlyfans.com"
+    ]
+  }
+]

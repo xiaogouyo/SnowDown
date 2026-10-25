@@ -19,10 +19,11 @@ New-Item -ItemType Directory -Force -Path $taskExtract | Out-Null
 try {
     & $SevenZipPath x ([IO.Path]::GetFullPath($PayloadPath)) "-o$taskExtract" -y -bso0 -bsp0
     if ($LASTEXITCODE -ne 0) { throw 'Cannot extract the NSIS payload for installed-file verification.' }
-    $taskOwnedFiles = @('snowdown.exe','resources/ffmpeg.exe','resources/FFMPEG-LICENSE.txt','resources/NOTICE.txt','resources/ffmpeg-build.json')
+    $taskOwnedFiles = @('snowdown.exe')
     $taskExtensionRoot = Join-Path $taskExtract 'resources\browser-extension'
     if (-not (Test-Path -LiteralPath (Join-Path $taskExtensionRoot 'manifest.json'))) { throw 'The NSIS payload is missing the browser extension.' }
-    $taskOwnedFiles += @(Get-ChildItem -LiteralPath $taskExtensionRoot -Recurse -File | Sort-Object FullName | ForEach-Object { 'resources/browser-extension/' + $_.FullName.Substring($taskExtensionRoot.Length+1).Replace('\','/') })
+    $taskResourceRoot = Join-Path $taskExtract 'resources'
+    $taskOwnedFiles += @(Get-ChildItem -LiteralPath $taskResourceRoot -Recurse -File | Sort-Object FullName | ForEach-Object { 'resources/' + $_.FullName.Substring($taskResourceRoot.Length+1).Replace('\','/') })
     $taskManifestLines = @('SnowDown-owned-files-v1')
     foreach ($taskOwnedFile in $taskOwnedFiles) {
         $taskSource = Join-Path $taskExtract $taskOwnedFile

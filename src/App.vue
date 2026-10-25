@@ -14,7 +14,7 @@ import MinimalMode from './components/MinimalMode.vue'
 import BrowserExtension from './components/BrowserExtension.vue'
 import { prepareModeMorph } from './modeMorph'
 import './modeMorph.css'
-import { identifySource, platformLabels, sourceSummary } from './sources'
+import { identifySource, platformLabels, sourceSummary, sourceLabel } from './sources'
 import { bytes, duration, errorMessage, statusLabels } from './format'
 import type { AppSnapshot, BatchOptions, BatchResult, ClipboardCapture, ClipboardSnapshot, DownloadTask, OutputFormat, Settings, VideoInfo, LoginQr, Platform, SourceLink } from './types'
 
@@ -156,7 +156,7 @@ function batchQueued(result: BatchResult) {
 async function analyze() {
   if (analyzing.value || updateOpen.value || modeSwitching.value) return
   if (simpleMode.value && pendingClipboard.value?.phase === 'parsing' && detectedSource.value?.url === pendingClipboard.value.source.url) { simpleExpanded.value = true; return }
-  if (!link.value.trim()) { focusLink(); notify('先粘贴一个B站、抖音或小红书视频链接。'); return }
+  if (!link.value.trim()) { focusLink(); notify('先粘贴一个视频链接。'); return }
   const source = identifySource(link.value)
   if (!source) { notify('没有识别到支持的视频链接，可粘贴平台的完整分享内容。', 'error'); return }
   const generation = ++parseGeneration
@@ -176,7 +176,7 @@ async function analyze() {
 async function paste() {
   try {
     const source = await api.readClipboardLink()
-    if (!source) { notify('剪贴板中没有B站、抖音或小红书视频链接。'); return }
+    if (!source) { notify('剪贴板中没有支持的视频链接。'); return }
     link.value = source.url; linkInput.value?.focus()
     await analyze()
   } catch { focusLink(); notify('无法读取剪贴板，请按 Ctrl+V 粘贴链接，再按 Enter 解析。') }
@@ -265,7 +265,7 @@ function setFilter(value: string | number) { filter.value = String(value) as typ
 
 async function openSourceLogin() {
   const source = detectedSource.value
-  if (!source || source.platform === 'bilibili') return
+  if (!source || source.platform === 'bilibili' || source.platform === 'web') return
   openSettings('account')
   accountPlatform.value = source.platform
   await startLogin()
@@ -311,7 +311,7 @@ async function bulk(name: 'pause' | 'resume') {
 function openSettings(tab: 'download' | 'account' = 'download') {
   if (snapshot.value) Object.assign(settingsDraft, snapshot.value.settings)
   settingsTab.value = tab; dialog.value = 'settings'
-  if (tab === 'account') accountPlatform.value = detectedSource.value?.platform ?? 'bilibili'
+  if (tab === 'account') accountPlatform.value = detectedSource.value?.platform === 'web' ? 'bilibili' : detectedSource.value?.platform ?? 'bilibili'
 }
 
 async function chooseFolder() {
@@ -502,8 +502,8 @@ onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); u
             <button class="paste-button" type="button" title="读取剪贴板并解析 · Ctrl+Shift+V" :disabled="analyzing" @click="paste"><ClipboardPaste :size="15" /><span>粘贴并解析</span></button>
             <button class="button primary analyze-button" type="submit" :disabled="analyzing"><LoaderCircle v-if="analyzing" :size="16" class="spin" /><Download v-else :size="16" />{{ analyzing ? '正在解析' : '解析视频' }}</button>
           </form>
-          <div class="link-card-footer"><span v-if="detectedSource" class="recognized-source"><CircleCheck :size="13" />已识别{{ platformLabels[detectedSource.platform] }}<small>{{ sourceSummary(detectedSource) }}</small></span><span v-else><Check :size="13" />自动识别平台 · 支持分享短链接</span><button v-if="detectedSource && detectedSource.platform !== 'bilibili'" class="text-button" @click="openSourceLogin">登录{{ platformLabels[detectedSource.platform] }}</button><span class="shortcut-tip"><kbd>Ctrl Shift V</kbd> 粘贴并解析 · <kbd>Enter</kbd> 解析</span></div>
-          <div v-if="clipboardSuggestion" class="clipboard-suggestion"><LoaderCircle v-if="pendingClipboard?.phase === 'parsing'" :size="15" class="spin" /><ClipboardPaste v-else :size="15" /><span>剪贴板识别到{{ platformLabels[clipboardSuggestion.platform] }}链接 · {{ clipboardMessage }}</span><button class="text-button" :disabled="pendingClipboard?.phase === 'parsing'" @click="parseClipboardSuggestion">{{ pendingClipboard?.phase === 'ready' ? '查看结果' : pendingClipboard?.phase === 'error' ? '重试解析' : '立即解析' }}<ArrowUpRight :size="13" /></button><button class="icon-button" aria-label="忽略剪贴板链接" @click="discardClipboard"><X :size="14" /></button></div>
+          <div class="link-card-footer"><span v-if="detectedSource" class="recognized-source"><CircleCheck :size="13" />已识别{{ sourceLabel(detectedSource) }}<small>{{ sourceSummary(detectedSource) }}</small></span><span v-else><Check :size="13" />自动识别平台 · 支持分享短链接</span><button v-if="detectedSource && ['douyin','xiaohongshu'].includes(detectedSource.platform)" class="text-button" @click="openSourceLogin">登录{{ sourceLabel(detectedSource) }}</button><span class="shortcut-tip"><kbd>Ctrl Shift V</kbd> 粘贴并解析 · <kbd>Enter</kbd> 解析</span></div>
+          <div v-if="clipboardSuggestion" class="clipboard-suggestion"><LoaderCircle v-if="pendingClipboard?.phase === 'parsing'" :size="15" class="spin" /><ClipboardPaste v-else :size="15" /><span>剪贴板识别到{{ sourceLabel(clipboardSuggestion) }}链接 · {{ clipboardMessage }}</span><button class="text-button" :disabled="pendingClipboard?.phase === 'parsing'" @click="parseClipboardSuggestion">{{ pendingClipboard?.phase === 'ready' ? '查看结果' : pendingClipboard?.phase === 'error' ? '重试解析' : '立即解析' }}<ArrowUpRight :size="13" /></button><button class="icon-button" aria-label="忽略剪贴板链接" @click="discardClipboard"><X :size="14" /></button></div>
         </section>
 
         <section class="task-section">
@@ -573,10 +573,10 @@ onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); u
     <div v-if="video && !simpleMode && !modeSwitching" class="modal-overlay" @mousedown.self="!submitting && (video = null)">
       <section class="modal video-modal" role="dialog" aria-modal="true" aria-labelledby="video-dialog-title">
         <div class="modal-header"><div><span class="eyebrow">NEW COLLECTION</span><h2 id="video-dialog-title">准备好收藏了吗？</h2></div><button class="icon-button" aria-label="关闭视频选择" :disabled="submitting" @click="video = null"><X :size="20" /></button></div>
-        <div class="video-summary"><img :src="video.cover" alt="视频封面" referrerpolicy="no-referrer" /><div><h3>{{ video.title }}</h3><p>{{ video.author }}<span>·</span>{{ duration(video.duration) }}<span>·</span>{{ video.pages.length }} {{ video.platform === 'bilibili' ? '个分P' : '个视频' }}</p><small>{{ platformLabels[video.platform] }} · {{ video.bvid }}</small></div></div>
+        <div class="video-summary"><img :src="video.cover" alt="视频封面" referrerpolicy="no-referrer" /><div><h3>{{ video.title }}</h3><p>{{ video.author }}<span>·</span>{{ duration(video.duration) }}<span>·</span>{{ video.pages.length }} {{ video.platform === 'bilibili' ? '个分P' : '个视频' }}</p><small>{{ sourceLabel(video) }} · {{ video.bvid }}</small></div></div>
         <div class="format-grid"><label :class="['format-option', { chosen: format === 'video' }]"><input v-model="format" type="radio" value="video" /><Film :size="21" /><span><strong>视频</strong><small>MP4 · 自动合并音视频</small></span><CircleCheck v-if="format === 'video'" :size="17" /></label><label :class="['format-option', { chosen: format === 'audio' }]"><input v-model="format" type="radio" value="audio" /><Music2 :size="21" /><span><strong>仅音频</strong><small>{{ video.platform === 'bilibili' ? 'M4A · 保留原始音质' : 'M4A · 提取音轨' }}</small></span><CircleCheck v-if="format === 'audio'" :size="17" /></label></div>
         <div v-if="format === 'video'" class="field-row"><span>视频画质</span><UiSelect :model-value="quality" :options="video.qualities.map(item => ({ value: item.id, label: item.label + (item.width ? ` · ${item.width} × ${item.height}` : '') }))" label="视频画质" @update:model-value="value => quality = Number(value)" /></div>
-        <p class="quality-hint"><Info :size="13" />{{ platformLabels[video.platform] }} · {{ video.platform === 'bilibili' ? '仅展示当前可用画质。扫码登录后重新解析可刷新画质。' : '仅展示平台实际返回的视频流，访问限制可在平台账号中处理。' }}</p>
+        <p class="quality-hint"><Info :size="13" />{{ sourceLabel(video) }} · {{ video.platform === 'bilibili' ? '仅展示当前可用画质。扫码登录后重新解析可刷新画质。' : '仅展示平台实际返回的视频流，访问限制可在平台账号中处理。' }}</p>
         <div class="pages-heading"><strong>{{ video.platform === 'bilibili' ? '选择分P' : '选择视频' }} <span>{{ selectedPages.length }} / {{ video.pages.length }}</span></strong><button v-if="video.pages.length > 1" class="text-button" @click="selectedPages = allPagesSelected ? [] : video.pages.map(p => p.cid)"><CheckCheck :size="14" />{{ allPagesSelected ? '取消全选' : '全选分P' }}</button></div>
         <div class="pages-list"><label v-for="page in video.pages" :key="page.cid" :class="['page-option', { checked: selectedPages.includes(page.cid) }]"><input type="checkbox" :checked="selectedPages.includes(page.cid)" @change="togglePage(page.cid)" /><span class="page-number">{{ video.platform === 'bilibili' ? `P${page.page}` : page.page }}</span><span class="part-title">{{ page.part }}</span><small>{{ duration(page.duration) }}</small></label></div>
         <div class="modal-footer"><span><FolderOpen :size="14" />保存到本地下载目录</span><button class="button primary" :disabled="!selectedPages.length || submitting" @click="submit"><LoaderCircle v-if="submitting" :size="16" class="spin" /><Download v-else :size="16" />下载 {{ selectedPages.length }} 项</button></div>

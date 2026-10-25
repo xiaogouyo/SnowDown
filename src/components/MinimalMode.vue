@@ -3,7 +3,7 @@ import { computed, nextTick, ref } from 'vue'
 import { ArrowUpRight, Check, ChevronDown, CircleAlert, ClipboardPaste, Copy, Download, FolderOpen, Link2, LoaderCircle, Minus, Pause, Play, Snowflake, Square, Trash2, X } from '@lucide/vue'
 import UiSelect from './UiSelect.vue'
 import { bytes, duration, statusLabels } from '../format'
-import { platformLabels } from '../sources'
+import { sourceLabel } from '../sources'
 import type { BatchOptions, DownloadTask, OutputFormat, SourceLink, VideoInfo } from '../types'
 
 const props = defineProps<{ link: string; source: SourceLink | null; video: VideoInfo | null; expanded: boolean; analyzing: boolean; submitting: boolean; quality: number; format: OutputFormat; pages: number[]; options: BatchOptions; tasks: DownloadTask[]; error: string; notice: string; maximized: boolean; clipboardHint: string }>()
@@ -29,16 +29,16 @@ defineExpose({ focus })
       <form class="minimal-input-bar" :aria-busy="analyzing" @submit.prevent="emit('analyze')">
         <Link2 :size="20" class="minimal-link-icon" />
         <input ref="input" :value="link" aria-label="简约视频链接" placeholder="粘贴视频链接，按 Enter 开始" spellcheck="false" autocomplete="off" @input="emit('update:link', ($event.target as HTMLInputElement).value)" />
-        <span v-if="source" class="minimal-platform">{{ platformLabels[source.platform] }}</span>
+        <span v-if="source" class="minimal-platform">{{ sourceLabel(source) }}</span>
         <button v-if="link || expanded" type="button" class="minimal-clear" aria-label="清空并重新输入" title="重新输入" @click="emit('reset'); focus()"><X :size="16" /></button>
         <button type="submit" class="minimal-parse" aria-label="解析视频" :disabled="analyzing || submitting" :title="analyzing ? '正在解析' : '解析视频'"><LoaderCircle v-if="analyzing" :size="20" class="spin" /><ArrowUpRight v-else :size="21" /></button>
       </form>
       <div v-if="clipboardHint && !expanded" class="minimal-clipboard"><ClipboardPaste :size="13" /><span>{{ clipboardHint }}</span><button @click="emit('clipboard')">使用链接</button></div>
       <div v-if="expanded" class="minimal-body">
         <Transition name="minimal-details" mode="out-in">
-          <div v-if="analyzing" key="parsing" class="minimal-loading" role="status"><span class="minimal-loading-line"></span><span class="minimal-loading-line short"></span><p><LoaderCircle :size="14" class="spin" />正在解析{{ source ? platformLabels[source.platform] : '视频' }}链接…</p></div>
+          <div v-if="analyzing" key="parsing" class="minimal-loading" role="status"><span class="minimal-loading-line"></span><span class="minimal-loading-line short"></span><p><LoaderCircle :size="14" class="spin" />正在解析{{ source ? sourceLabel(source) : '视频' }}链接…</p></div>
           <section v-else-if="video" key="video" class="minimal-result" aria-label="视频下载设置">
-            <div class="minimal-video"><img v-if="video.cover" :src="video.cover" alt="视频封面" referrerpolicy="no-referrer" /><span v-else class="minimal-cover"><Snowflake :size="27" /></span><div><small>{{ platformLabels[video.platform] }} · {{ duration(video.duration) }}</small><h1>{{ video.title }}</h1><p>{{ video.author }}</p></div></div>
+            <div class="minimal-video"><img v-if="video.cover" :src="video.cover" alt="视频封面" referrerpolicy="no-referrer" /><span v-else class="minimal-cover"><Snowflake :size="27" /></span><div><small>{{ sourceLabel(video) }} · {{ duration(video.duration) }}</small><h1>{{ video.title }}</h1><p>{{ video.author }}</p></div></div>
             <div class="minimal-options">
               <div class="minimal-option"><span>格式</span><div class="minimal-segments" aria-label="下载格式"><button :class="{ selected: format === 'video' }" :aria-pressed="format === 'video'" @click="emit('update:format', 'video')">视频 <small>MP4</small></button><button :class="{ selected: format === 'audio' }" :aria-pressed="format === 'audio'" @click="emit('update:format', 'audio')">音频 <small>M4A</small></button></div></div>
               <div v-if="format === 'video'" class="minimal-option minimal-quality"><span>画质</span><UiSelect :model-value="quality" :options="video.qualities.map(item => ({ value: item.id, label: item.label }))" label="简约视频画质" @update:model-value="value => emit('update:quality', Number(value))" /></div>

@@ -66,7 +66,7 @@ namespace SnowDown.Setup
             bool rootFile = pieces.Length == 1 && (name.Equals("snowdown.exe", StringComparison.OrdinalIgnoreCase) || name.Equals("uninstall.exe", StringComparison.OrdinalIgnoreCase) || name.Equals("snowdown.pdb", StringComparison.OrdinalIgnoreCase) || name.Equals("snowdown.dll", StringComparison.OrdinalIgnoreCase));
             string extension = Path.GetExtension(name).ToLowerInvariant();
             bool resource = pieces.Length >= 2 && pieces[0].Equals("resources", StringComparison.OrdinalIgnoreCase)
-                && (extension == ".exe" || extension == ".dll" || extension == ".pak" || extension == ".pdb" || (pieces.Length >= 3 && pieces[1] == "browser-extension" && new[]{".js",".json",".html",".css",".png",".txt"}.Contains(extension)) || name == "ffmpeg-build.json" || name == "NOTICE.txt" || name == "FFMPEG-LICENSE.txt");
+                && (extension == ".exe" || extension == ".dll" || extension == ".pak" || extension == ".pdb" || (pieces.Length >= 3 && pieces[1] == "browser-extension" && new[]{".js",".json",".html",".css",".png",".txt"}.Contains(extension)) || name == "ffmpeg-build.json" || name == "extractor-build.json" || name == "EXTRACTOR-LICENSE.txt" || name == "NOTICE.txt" || name == "FFMPEG-LICENSE.txt");
             if (!rootFile && !resource) return null;
             string lower = name.ToLowerInvariant();
             if (lower.Contains("cookie") || lower.Contains("session") || lower.Contains("login") || lower.Contains("setting")) return null;

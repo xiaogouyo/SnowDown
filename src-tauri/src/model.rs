@@ -15,6 +15,7 @@ pub enum Platform {
     Bilibili,
     Douyin,
     Xiaohongshu,
+    Web,
 }
 
 impl Platform {
@@ -23,6 +24,7 @@ impl Platform {
             Self::Bilibili => "bilibili",
             Self::Douyin => "douyin",
             Self::Xiaohongshu => "xiaohongshu",
+            Self::Web => "web",
         }
     }
     pub fn label(self) -> &'static str {
@@ -30,6 +32,7 @@ impl Platform {
             Self::Bilibili => "B站",
             Self::Douyin => "抖音",
             Self::Xiaohongshu => "小红书",
+            Self::Web => "网页视频",
         }
     }
     pub fn home(self) -> &'static str {
@@ -37,6 +40,7 @@ impl Platform {
             Self::Bilibili => "https://www.bilibili.com/",
             Self::Douyin => "https://www.douyin.com/",
             Self::Xiaohongshu => "https://www.xiaohongshu.com/",
+            Self::Web => "https://www.youtube.com/",
         }
     }
 }

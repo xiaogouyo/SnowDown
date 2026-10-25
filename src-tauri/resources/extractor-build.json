@@ -1,0 +1,20 @@
+{
+  "components": [
+    {
+      "repository": "yt-dlp/yt-dlp",
+      "version": "2026.10.21",
+      "source": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp.exe",
+      "sha256": "33121d192d706e62f684a06f80918e3f3a8ba52ac3a65213b6951c39c7d9f555",
+      "binary": "yt-dlp.exe",
+      "binarySha256": "33121d192d706e62f684a06f80918e3f3a8ba52ac3a65213b6951c39c7d9f555"
+    },
+    {
+      "repository": "denoland/deno",
+      "version": "v2.9.8",
+      "source": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-pc-windows-msvc.zip",
+      "sha256": "cba84b26e0df5ae7f74fc66b86a95b866872a86292ebd84fa1e959927edd93bf",
+      "binary": "deno.exe",
+      "binarySha256": "924397800533d3eb0ed0c889b20ad70e18b970d93acd8135bc043f425e528266"
+    }
+  ]
+}

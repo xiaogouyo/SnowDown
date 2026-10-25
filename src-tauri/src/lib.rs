@@ -14,6 +14,7 @@ mod engine;
 mod extension_package;
 #[cfg(all(debug_assertions, windows))]
 mod extension_package_probe;
+mod extractor_proxy;
 #[cfg(all(debug_assertions, windows))]
 mod login_check_probe;
 #[cfg(debug_assertions)]
@@ -21,13 +22,13 @@ mod minimal_probe;
 #[cfg(all(debug_assertions, windows))]
 mod mode_morph_probe;
 mod model;
+mod notifications;
 mod qr_login;
 mod resource_download;
 mod site_sessions;
 mod sites;
 mod storage;
 mod task_files;
-mod notifications;
 mod transfer;
 mod tray_menu;
 mod update_cleanup;
@@ -35,6 +36,7 @@ mod update_mirrors;
 mod update_notice;
 mod updater;
 mod web_capture;
+mod web_extractor;
 
 use model::*;
 use std::{
@@ -66,6 +68,7 @@ pub struct AppState {
     update_notice: update_notice::Notice,
     browser: browser_bridge::Bridge,
     notifications: notifications::Notifications,
+    extractor: web_extractor::Extractor,
 }
 
 impl AppState {
@@ -112,7 +115,8 @@ impl AppState {
         }
         self.emit(app);
         if let Some(title) = completed {
-            self.notifications.show(app, format!("complete:{id}"), "下载完成", &title);
+            self.notifications
+                .show(app, format!("complete:{id}"), "下载完成", &title);
         }
         Ok(())
     }
@@ -329,7 +333,12 @@ async fn inspect_video(
     state: State<'_, Arc<AppState>>,
 ) -> Result<VideoInfo, String> {
     let source = sites::recognize(&input)?;
-    state.notifications.show(&app, format!("link:{}", source.url), "发现视频链接", &format!("已识别{}视频链接，正在解析。", source.platform.label()));
+    state.notifications.show(
+        &app,
+        format!("link:{}", source.url),
+        "发现视频链接",
+        &format!("已识别{}视频链接，正在解析。", source.platform.label()),
+    );
     if state.clipboard.manual(clipboard::sequence()) {
         clipboard_watch::emit(&app, &state);
     }
@@ -341,7 +350,9 @@ async fn inspect_source(
     state: &AppState,
     source: &sites::Source,
 ) -> Result<VideoInfo, String> {
-    if source.platform == Platform::Bilibili {
+    if source.platform == Platform::Web {
+        state.extractor.inspect(app, source).await
+    } else if source.platform == Platform::Bilibili {
         bilibili::inspect(&source.url, &state.auth.cookie()).await
     } else {
         Ok(state.site_sessions.resolve(app, source, 0).await?.info)
@@ -742,6 +753,7 @@ pub fn run() {
                 update_notice: update_notice::Notice::default(),
                 browser: browser_bridge::Bridge::default(),
                 notifications: notifications::Notifications::default(),
+                extractor: web_extractor::Extractor::default(),
             });
             app.manage(state.clone());
             notifications::prepare(&handle, &data_dir);

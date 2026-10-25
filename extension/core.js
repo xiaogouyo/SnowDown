@@ -1,6 +1,8 @@
-export const platformNames={bilibili:'B站',douyin:'抖音',xiaohongshu:'小红书'};
+import {siteOf} from './catalog.js';
+export const sessionPlatforms=['bilibili','douyin','xiaohongshu'];
+export const platformNames={bilibili:'B站',douyin:'抖音',xiaohongshu:'小红书',web:'网页视频'};
 export const repository='https://github.com/xiaogouyo/SnowDown/releases/latest';
-export function platformOf(input){try{const h=new URL(input).hostname;return Object.keys(platformNames).find(p=>h===`${p}.com`||h.endsWith(`.${p}.com`))||null}catch{return null}}
+export function platformOf(input){const site=siteOf(input);return site?sessionPlatforms.includes(site.id)?site.id:'web':null}
 export function safeUrl(input){try{const u=new URL(input);return ['http:','https:'].includes(u.protocol)&&!u.username&&!u.password?u.href:null}catch{return null}}
 export function safeName(input,fallback='SnowDown'){return String(input||fallback).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/[. ]+$/,'').slice(0,120)||fallback}
 export function resourceKind(url,mime=''){if(/^image\//i.test(mime)||/\.(png|jpe?g|gif|webp|avif|svg|bmp)(?:$|[?#])/i.test(url))return 'image';if(/mpegurl|dash\+xml/i.test(mime)||/\.(m3u8|mpd)(?:$|[?#])/i.test(url))return 'manifest';if(/^video\//i.test(mime)||/\.(mp4|webm|mov|m4v|m4s)(?:$|[?#])/i.test(url))return 'video';if(/^audio\//i.test(mime)||/\.(mp3|m4a|aac|ogg|wav)(?:$|[?#])/i.test(url))return 'audio';return null}

@@ -1,6 +1,6 @@
 // Executes in the current tab's MAIN world. No form values or arbitrary cookies.
-export function capturePage({resources:includeResources=false,backgrounds=true}={}){
-  const url=location.href,host=location.hostname;
+export function capturePage({resources:includeResources=false,backgrounds=true,targetUrl=null}={}){
+  const url=targetUrl||location.href,host=new URL(url).hostname;
   const matches=base=>host===base||host.endsWith(`.${base}`);
   const platform=matches('bilibili.com')?'bilibili':matches('douyin.com')?'douyin':matches('xiaohongshu.com')?'xiaohongshu':null;
   const resources=[];
@@ -61,5 +61,14 @@ export function capturePage({resources:includeResources=false,backgrounds=true}=
   const image=root?.querySelector('img')||(root?.tagName==='IMG'?root:null);
   const account=image?{name:(root?.title||image.alt||'').slice(0,80),avatar:image.currentSrc||image.src}:null;
   const verificationRequired=platform==='douyin'&&/验证码中间页|安全验证|security verification/i.test(document.title);
-  return {url,platform,id,title:document.title.slice(0,200),detail,account,resources,verificationRequired};
+  const preview=url!==location.href,media=[];
+  const videos=[...document.querySelectorAll('video')].filter(video=>{const rect=video.getBoundingClientRect();return rect.width>100&&rect.height>70&&rect.bottom>0&&rect.top<innerHeight&&(!preview||video.closest('a[href]')?.href===url)});
+  for(const video of videos.slice(0,16)){const src=video.currentSrc||video.src;if(/^https?:/.test(src))media.push({url:src,width:video.videoWidth,height:video.videoHeight,cover:video.poster,label:video.videoHeight?`${video.videoHeight}P`:'原始画质'});}
+  if(!preview){for(const meta of document.querySelectorAll('meta[property="og:video"],meta[property="og:video:url"],meta[property="og:video:secure_url"],meta[name="twitter:player:stream"]'))if(/^https?:/.test(meta.content))media.push({url:meta.content,label:'原始画质'});
+   for(const script of [...document.querySelectorAll('script[type="application/ld+json"]')].slice(0,15)){if(script.textContent.length>512*1024)continue;try{const root=JSON.parse(script.textContent),queue=Array.isArray(root)?root:[root];let n=0;while(queue.length&&n++<200){const item=queue.shift();if(!item||typeof item!=='object')continue;if(item['@type']==='VideoObject'&&typeof item.contentUrl==='string')media.push({url:item.contentUrl,label:'原始画质',cover:Array.isArray(item.thumbnailUrl)?item.thumbnailUrl[0]:item.thumbnailUrl});for(const value of Object.values(item))if(value&&typeof value==='object')queue.push(...(Array.isArray(value)?value:[value]));}}catch{}}
+  }
+  const youtube=window.ytInitialPlayerResponse,targetId=new URL(url).searchParams.get('v')||new URL(url).pathname.match(/\/(?:shorts|live)\/([\w-]+)/)?.[1];
+  if((host==='youtube.com'||host.endsWith('.youtube.com'))&&targetId&&youtube?.videoDetails?.videoId===targetId){const data=youtube.streamingData||{},audio=(data.adaptiveFormats||[]).filter(f=>/^audio\//.test(f.mimeType||'')&&/^https?:/.test(f.url||'')).sort((a,b)=>b.bitrate-a.bitrate)[0]?.url;for(const f of [...(data.formats||[]),...(data.adaptiveFormats||[])].slice(0,128))if(/^video\//.test(f.mimeType||'')&&/^https?:/.test(f.url||''))media.push({url:f.url,width:f.width,height:f.height,label:f.qualityLabel||'原始画质',audio:(data.adaptiveFormats||[]).includes(f)?audio:null,ext:/webm/.test(f.mimeType)?'webm':'mp4'});}
+  const cover=document.querySelector('meta[property="og:image"]')?.content;
+  return {url,platform,id,title:document.title.slice(0,200),detail,account,resources,verificationRequired,media,singleVisibleVideo:videos.length===1,cover};
 }

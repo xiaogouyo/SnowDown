@@ -15,6 +15,7 @@ const FILES: &[&str] = &[
     "popup.js",
     "job.js",
     "floating.js",
+    "preview.js",
     "MEDIABUNNY-LICENSE.txt",
     "icons/32.png",
     "icons/128.png",
@@ -33,7 +34,6 @@ impl Drop for Temporary {
 
 #[cfg(windows)]
 pub fn export(source: &Path, destination: &Path) -> Result<PathBuf, String> {
-    use std::os::windows::process::CommandExt;
     let mut target = destination.to_owned();
     if target.extension().is_none() {
         target.set_extension("zip");
@@ -72,16 +72,27 @@ pub fn export(source: &Path, destination: &Path) -> Result<PathBuf, String> {
         }
         fs::copy(origin, temporary.directory.join(file)).map_err(|_| "无法读取内置插件文件。")?;
     }
-    // Paths are passed as environment values, never interpolated into shell code.
-    let result = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile","-NonInteractive","-WindowStyle","Hidden","-Command",
-            "$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::CreateFromDirectory($env:SNOWDOWN_ZIP_SOURCE,$env:SNOWDOWN_ZIP_TARGET,[IO.Compression.CompressionLevel]::Optimal,$false)"])
-        .env("SNOWDOWN_ZIP_SOURCE", &temporary.directory)
-        .env("SNOWDOWN_ZIP_TARGET", &temporary.archive)
-        .creation_flags(0x08000000).output().map_err(|_|"无法创建插件 ZIP，请检查本机 Windows 组件。")?;
-    if !result.status.success() || !fs::metadata(&temporary.archive).is_ok_and(|m| m.len() > 22) {
-        return Err("无法生成插件 ZIP，请检查保存目录是否可写。".into());
+    // Native ZIP creation avoids invoking a shell or depending on PowerShell's
+    // runtime/module configuration. Only the explicit public bundle is included.
+    let archive = fs::File::create(&temporary.archive).map_err(|_| "无法创建插件 ZIP。")?;
+    let mut writer = zip::ZipWriter::new(archive);
+    for file in FILES {
+        writer
+            .start_file(
+                *file,
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored),
+            )
+            .map_err(|_| "无法生成插件 ZIP。")?;
+        let mut source =
+            fs::File::open(temporary.directory.join(file)).map_err(|_| "无法读取插件文件。")?;
+        std::io::copy(&mut source, &mut writer).map_err(|_| "无法写入插件 ZIP。")?;
     }
+    writer
+        .finish()
+        .map_err(|_| "无法完成插件 ZIP。")?
+        .sync_all()
+        .map_err(|_| "无法保存插件 ZIP。")?;
     // Build beside the destination, then replace it only after ZIP creation
     // succeeds. A missing resource or failed archive leaves an existing ZIP intact.
     fs::rename(&temporary.archive, &target)
@@ -96,7 +107,6 @@ pub fn export(_: &Path, _: &Path) -> Result<PathBuf, String> {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
-    use std::os::windows::process::CommandExt;
     #[test]
     fn exports_only_public_bundle_handles_literal_paths_and_keeps_existing_zip_on_failure() {
         let directory =
@@ -115,11 +125,16 @@ mod tests {
         fs::create_dir(&parent).unwrap();
         let target = parent.join("SnowDown.zip");
         assert_eq!(export(&source, &target).unwrap(), target);
-        let read=std::process::Command::new("powershell.exe").args(["-NoProfile","-NonInteractive","-Command",
-            "Add-Type -AssemblyName System.IO.Compression.FileSystem; $z=[IO.Compression.ZipFile]::OpenRead($env:SNOWDOWN_TEST_ZIP); try { @($z.Entries | ForEach-Object { $_.FullName.Replace('\\','/') }) | ConvertTo-Json -Compress } finally { $z.Dispose() }"])
-            .env("SNOWDOWN_TEST_ZIP",&target).creation_flags(0x08000000).output().unwrap();
-        assert!(read.status.success());
-        let mut entries: Vec<String> = serde_json::from_slice(&read.stdout).unwrap();
+        let mut archive = zip::ZipArchive::new(fs::File::open(&target).unwrap()).unwrap();
+        let mut entries: Vec<String> = archive.file_names().map(str::to_owned).collect();
+        for file in FILES {
+            use std::io::Read;
+            let mut entry = archive.by_name(file).unwrap();
+            let mut bytes = vec![];
+            entry.read_to_end(&mut bytes).unwrap();
+            assert_eq!(bytes, fs::read(source.join(file)).unwrap());
+        }
+        drop(archive);
         entries.sort();
         let mut expected: Vec<_> = FILES.iter().map(|x| x.to_string()).collect();
         expected.sort();

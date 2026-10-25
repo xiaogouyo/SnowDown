@@ -1,4 +1,6 @@
 import {platformNames,filterResources,safeUrl} from './core.js';
+import {downloadRows} from './media.js';
+import {siteOf,sites} from './catalog.js';
 const $=id=>document.getElementById(id);let tab,items=[],parsed,mode='platform',settingsOpen=false,status,selected=new Set();
 const message=text=>{$('message').textContent=text};
 async function send(type,data={}){const result=await chrome.runtime.sendMessage({type,...data});if(!result?.ok)throw Error(result?.error||'操作未完成');return result.data}
@@ -12,7 +14,8 @@ function render(){const result=filterResources(items,{kind:$('kind').value,forma
  const info=document.createElement('div'),name=document.createElement('strong'),detail=document.createElement('small');name.textContent=item.name||decodeURIComponent(new URL(item.url).pathname.split('/').pop()||'资源');detail.textContent=`${item.kind} ${item.width&&item.height?`${item.width} × ${item.height}`:''} ${item.size?`${(item.size/1024/1024).toFixed(1)} MB`:''}`;info.append(name,detail);info.title=item.url;row.append(info);$('list').append(row);}
  $('all').onchange=()=>{for(const item of result)$('all').checked?selected.add(item.url):selected.delete(item.url);render()};
 }
-action('parse',async()=>{if(!tab?.id)throw Error('请先打开目标视频页面。');message('正在读取当前平台的视频和可用画质…');parsed=await send('parse',{tabId:tab.id});$('videoTitle').textContent=parsed.video.title;$('author').textContent=parsed.video.author||'';$('cover').src=safeUrl(parsed.video.cover)||'icons/128.png';$('quality').replaceChildren(...parsed.video.streams.map((s,i)=>new Option(s.label||'原始画质',String(i))));$('video').hidden=false;$('platform').classList.add('has-video');message('已使用当前浏览器的平台会话。')});
+action('parse',async()=>{if(!tab?.id)throw Error('请先打开目标视频页面。');message('正在读取当前平台的视频和可用画质…');parsed=await send('parse',{tabId:tab.id});$('videoTitle').textContent=parsed.video.title;$('author').textContent=parsed.video.author||'';$('cover').src=safeUrl(parsed.video.cover)||'icons/128.png';$('quality').replaceChildren(...parsed.video.streams.map((s,i)=>new Option(s.label||'原始画质',String(i))));renderFormats();$('video').hidden=false;$('platform').classList.add('has-video');message(parsed.video.streams.some(s=>s.native)?'已通过桌面端取得可用画质。':'已使用当前浏览器的平台会话。')});
+function renderFormats(){$('platformLabel').textContent=siteOf(parsed.page.url)?.label||'网页视频';$('pageTitle').textContent=parsed.page.title||parsed.video.title;const container=$('quickFormats');container.replaceChildren();for(const row of downloadRows(parsed.video)){const button=document.createElement('button');button.className='format-row';button.type='button';const icon=document.createElement('span');icon.className='format-icon';icon.textContent=row.kind==='video'?'▷':row.kind==='audio'?'♫':'▧';const label=document.createElement('span');label.textContent=row.label;const arrow=document.createElement('span');arrow.className='format-arrow';arrow.textContent='↓';button.append(icon,label,arrow);button.setAttribute('aria-label',`下载 ${row.label}`);button.onclick=async()=>{button.disabled=true;try{const value=await send('download',row.kind==='image'?{resource:{url:parsed.video.cover,kind:'image',name:parsed.video.title+'-cover'},browserOnly:true}:{page:parsed.page,stream:parsed.video.streams[row.index],title:parsed.video.title,format:row.kind==='audio'?'audio':'video'});message(value.message)}catch(error){message(error.message)}finally{button.disabled=false}};container.append(button)}}
 action('downloadVideo',async()=>{if(!parsed)return;message((await send('download',{page:parsed.page,stream:parsed.video.streams[Number($('quality').value)],title:parsed.video.title})).message)});
 action('refresh',scan);action('downloadSelected',async()=>{const list=items.filter(item=>selected.has(item.url));if(!list.length)throw Error('请选择资源。');let done=0;for(const resource of list){try{await send('download',{resource});done++}catch(e){message(e.message)}}message(`已提交 ${done} / ${list.length} 项下载。`)});
 action('platformMode',()=>changeMode('platform'));action('resourceMode',()=>changeMode('resources'));action('brand',()=>changeMode(mode==='platform'?'resources':'platform'));
@@ -22,6 +25,7 @@ $('forward').onchange=async()=>{try{if($('forward').checked&&!status.connected){
 $('sync').onchange=async()=>{try{await send('settings',{preferDesktop:status.settings.preferDesktop,syncAccounts:$('sync').checked});await refreshStatus()}catch(e){message(e.message)}};
 action('syncNow',async()=>{if(!status.connected)throw Error('请先启动 SnowDown 桌面端。');await send('sync');await refreshStatus();message('账号同步完成；仅同步浏览器已登录的平台。')});
 action('getDesktop',()=>send('desktop-download'));
+action('enableSites',async()=>{const allowed=await chrome.permissions.request({origins:['http://*/*','https://*/*']});message(allowed?`已启用 ${sites.length} 类站点的预览识别与网页资源读取。请刷新已有页面。`:'未授予更多站点权限，原有三平台仍可使用。')});
 $('floating').onchange=async()=>{try{await send('settings',{floatingEnabled:$('floating').checked});message($('floating').checked?'视频悬浮提醒已开启。':'视频悬浮提醒已关闭。')}catch(e){message(e.message)}};
 action('openTab',()=>chrome.tabs.create({url:chrome.runtime.getURL(`popup.html?tab=${tab?.id||''}`)}));
 try{
@@ -29,5 +33,6 @@ try{
  const id=Number(new URL(location.href).searchParams.get('tab'));tab=id?await chrome.tabs.get(id):(await chrome.tabs.query({active:true,currentWindow:true}))[0];
  if(tab?.url?.startsWith(chrome.runtime.getURL('')))tab=null;
  $('pageTitle').textContent=tab?.title||'打开目标视频页面，再点击 SnowDown';
+ $('platformLabel').textContent=siteOf(tab?.url)?.label||'视频画质、音频与封面，一处下载';
  void refreshStatus().catch(e=>message(e.message));const timer=setInterval(()=>void refreshStatus().catch(()=>{}),5000);window.addEventListener('unload',()=>clearInterval(timer));
 }catch(e){message(e.message)}

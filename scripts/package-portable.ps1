@@ -9,7 +9,7 @@ if (-not $taskResolved.StartsWith($taskRoot + [IO.Path]::DirectorySeparatorChar,
 $taskResources = Join-Path $taskPortable 'resources'
 New-Item -ItemType Directory -Force -Path $taskResources | Out-Null
 Copy-Item -LiteralPath (Join-Path $taskRoot 'src-tauri\target\release\snowdown.exe') -Destination (Join-Path $taskPortable 'SnowDown.exe')
-foreach ($taskFile in @('ffmpeg.exe', 'FFMPEG-LICENSE.txt', 'NOTICE.txt', 'ffmpeg-build.json')) {
+foreach ($taskFile in @('ffmpeg.exe', 'ffprobe.exe', 'yt-dlp.exe', 'deno.exe', 'EXTRACTOR-LICENSE.txt', 'extractor-build.json', 'FFMPEG-LICENSE.txt', 'NOTICE.txt', 'ffmpeg-build.json')) {
     Copy-Item -LiteralPath (Join-Path $taskRoot ('src-tauri\resources\' + $taskFile)) -Destination (Join-Path $taskResources $taskFile)
 }
 Copy-Item -LiteralPath (Join-Path $taskRoot 'src-tauri\resources\browser-extension') -Destination $taskResources -Recurse -Force
@@ -20,7 +20,9 @@ SnowDown Windows $taskVersion
 使用 Windows 10/11 x64，系统需要 WebView2 运行时。
 解压整个文件夹，双击 SnowDown.exe；请保留 resources 文件夹。
 
-粘贴B站、抖音或小红书视频链接 → 解析视频 → 选择画质和格式 → 下载。
+粘贴B站、抖音、小红书或共享目录中的其他平台链接 → 解析视频 → 选择画质和格式 → 下载。
+新增站点以公开页面或浏览器当前已加载媒体为基础，部分内容需登录或可能受平台限制。
+插件偏好设置中开启“启用更多平台与预览下载”，确认权限并刷新网页，可使用预览卡片下载菜单。
 点击“批量下载”或 Ctrl+N，可混合粘贴多个平台链接，用换行、空格或逗号分隔。
 统一设置格式、画质、保存目录、附件、分P范围和任务启动间隔后，一键加入下载队列。
 点击左上角 SnowDown 标志切换简约模式，再次点击返回；模式切换有动画并记住偏好。

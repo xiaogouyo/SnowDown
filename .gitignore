@@ -4,6 +4,8 @@ src-tauri/target/
 src-tauri/gen/schemas/
 src-tauri/resources/ffmpeg.exe
 src-tauri/resources/ffprobe.exe
+src-tauri/resources/yt-dlp.exe
+src-tauri/resources/deno.exe
 src-tauri/resources/browser-extension/
 .tools/
 release/
