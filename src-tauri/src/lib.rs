@@ -11,6 +11,8 @@ mod clipboard_watch;
 #[cfg(debug_assertions)]
 mod debug_probe;
 mod engine;
+#[cfg(all(debug_assertions, windows))]
+mod login_check_probe;
 #[cfg(debug_assertions)]
 mod minimal_probe;
 mod model;
@@ -543,13 +545,23 @@ async fn check_login(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
     platform: Option<Platform>,
-) -> Result<(), String> {
+) -> Result<qr_login::LoginCheck, String> {
     let platform = platform.unwrap_or_default();
     let result = if platform == Platform::Bilibili {
         state.auth.validate().await;
-        Ok(())
+        let auth = state.auth.snapshot();
+        Ok(match auth.state.as_str() {
+            "authenticated" => qr_login::LoginCheck::new("authenticated", "登录状态有效。"),
+            "loggedout" | "expired" => {
+                qr_login::LoginCheck::new("loggedout", "尚未登录或登录已失效，请扫码登录。")
+            }
+            _ => qr_login::LoginCheck::new(
+                "unknown",
+                "暂时无法确认登录状态，原有账号已保留，请稍后重试。",
+            ),
+        })
     } else {
-        state.qr_login.check(&app, platform).await.map(|_| ())
+        state.qr_login.check(&app, platform).await
     };
     state.emit(&app);
     result
@@ -604,6 +616,10 @@ pub fn run() {
             #[cfg(debug_assertions)]
             let data_dir = if std::env::var_os("SNOWDOWN_QR_VERIFY").is_some() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/qr-qa-app-data")
+            } else if std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some() {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../.tools/login-check-qa")
+                    .join(uuid::Uuid::new_v4().to_string())
             } else if std::env::var_os("SNOWDOWN_BROWSER_VERIFY").is_some() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/bridge-qa-data/app")
             } else if std::env::var_os("SNOWDOWN_BATCH_VERIFY").is_some() {
@@ -630,6 +646,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             let default_download = if std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some()
                 || std::env::var_os("SNOWDOWN_BROWSER_VERIFY").is_some()
+                || std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some()
             {
                 data_dir.join("media")
             } else {
@@ -678,7 +695,8 @@ pub fn run() {
             tray_menu::create(&handle)?;
             update_notice::create(&handle)?;
             #[cfg(debug_assertions)]
-            let browser_test = std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some();
+            let browser_test = std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some()
+                || std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some();
             #[cfg(not(debug_assertions))]
             let browser_test = false;
             if !browser_test {
@@ -690,12 +708,17 @@ pub fn run() {
                 // The installer can still hold its own executable briefly after launch.
                 for _ in 0..30 {
                     update_cleanup::installed(&cleanup_dir, updater_version).await;
-                    browser_bridge::cleanup_hosts();
+                    if !browser_test {
+                        browser_bridge::cleanup_hosts();
+                    }
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 }
             });
             #[cfg(debug_assertions)]
-            if std::env::var_os("SNOWDOWN_BROWSER_VERIFY").is_some() {
+            if std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some() {
+                #[cfg(windows)]
+                login_check_probe::start(handle.clone(), data_dir.clone());
+            } else if std::env::var_os("SNOWDOWN_BROWSER_VERIFY").is_some() {
                 let app = handle.clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(6)).await;

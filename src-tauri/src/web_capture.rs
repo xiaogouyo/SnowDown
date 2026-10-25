@@ -216,3 +216,67 @@ pub async fn clear_profile(window: &WebviewWindow) -> Result<(), String> {
         .clear_all_browsing_data()
         .map_err(|_| "清除平台登录资料失败。".into())
 }
+
+/// Keep the leading dot when writing platform domain cookies. The generic
+/// Cookie::domain() accessor removes it, which makes WebView2 create a host-only
+/// cookie that is invisible to the platform's www subdomain.
+#[cfg(windows)]
+pub async fn restore_cookies(
+    window: &WebviewWindow,
+    cookies: Vec<tauri::webview::Cookie<'static>>,
+) -> Result<(), String> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_2;
+    use windows::core::{Interface, HSTRING};
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    window
+        .with_webview(move |view| unsafe {
+            let result = (|| -> windows::core::Result<()> {
+                let manager = view
+                    .controller()
+                    .CoreWebView2()?
+                    .cast::<ICoreWebView2_2>()?
+                    .CookieManager()?;
+                for cookie in cookies {
+                    let domain = match cookie.domain() {
+                        Some("douyin.com") => ".douyin.com",
+                        Some("xiaohongshu.com") => ".xiaohongshu.com",
+                        _ => {
+                            return Err(windows::core::Error::from_hresult(windows::core::HRESULT(
+                                0x80070057u32 as i32,
+                            )))
+                        }
+                    };
+                    let native = manager.CreateCookie(
+                        &HSTRING::from(cookie.name()),
+                        &HSTRING::from(cookie.value()),
+                        &HSTRING::from(domain),
+                        &HSTRING::from("/"),
+                    )?;
+                    native.SetIsSecure(true)?;
+                    native.SetIsHttpOnly(cookie.http_only().unwrap_or(false))?;
+                    manager.AddOrUpdateCookie(&native)?;
+                }
+                Ok(())
+            })();
+            let _ = sender
+                .send(result.map_err(|_| "无法恢复官方网页会话，原有账号已保留。".to_string()));
+        })
+        .map_err(|_| "无法写入平台网页会话。")?;
+    tokio::time::timeout(std::time::Duration::from_secs(5), receiver)
+        .await
+        .map_err(|_| "恢复平台网页会话超时。")?
+        .map_err(|_| "恢复平台网页会话失败。")?
+}
+
+#[cfg(not(windows))]
+pub async fn restore_cookies(
+    window: &WebviewWindow,
+    cookies: Vec<tauri::webview::Cookie<'static>>,
+) -> Result<(), String> {
+    for cookie in cookies {
+        window
+            .set_cookie(cookie)
+            .map_err(|_| "无法恢复平台网页会话。")?;
+    }
+    Ok(())
+}

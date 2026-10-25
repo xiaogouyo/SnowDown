@@ -44,6 +44,34 @@ impl LoginPoll {
     }
 }
 
+#[derive(Serialize)]
+pub struct LoginCheck {
+    pub state: &'static str,
+    pub message: String,
+}
+impl LoginCheck {
+    pub fn new(state: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            state,
+            message: message.into(),
+        }
+    }
+}
+#[derive(Default)]
+struct CheckEvidence {
+    confirmed: usize,
+}
+impl CheckEvidence {
+    fn observe(&mut self, state: &str, elapsed: Duration) -> bool {
+        self.confirmed = if state == "confirmed" {
+            self.confirmed + 1
+        } else {
+            0
+        };
+        self.confirmed >= 2 && elapsed >= Duration::from_secs(3)
+    }
+}
+
 #[derive(Default, Deserialize)]
 struct Frame {
     state: String,
@@ -105,7 +133,7 @@ fn has_account_cookie(platform: Platform, cookie: &str) -> bool {
         })
 }
 
-async fn frame(app: &AppHandle, platform: Platform) -> Result<Frame, String> {
+async fn frame(app: &AppHandle, platform: Platform, check_only: bool) -> Result<Frame, String> {
     let window = app
         .get_webview_window(&format!("official-{}", platform.key()))
         .ok_or("官方登录页面已关闭，请重新获取二维码。")?;
@@ -122,7 +150,8 @@ async fn frame(app: &AppHandle, platform: Platform) -> Result<Frame, String> {
         return Ok(Frame::default());
     }
     let script = include_str!("site_qr.js")
-        .replace("__PLATFORM__", &serde_json::to_string(&platform).unwrap());
+        .replace("__PLATFORM__", &serde_json::to_string(&platform).unwrap())
+        .replace("__CHECK_ONLY__", if check_only { "true" } else { "false" });
     let (sender, receiver) = tokio::sync::oneshot::channel();
     let sender = Mutex::new(Some(sender));
     window
@@ -178,7 +207,7 @@ impl QrLogin {
         if !has_account_cookie(platform, &cookie) {
             return Err("平台尚未确认账号登录，请在手机上确认后重新获取二维码。".into());
         }
-        let account = frame(app, platform)
+        let account = frame(app, platform, true)
             .await
             .ok()
             .and_then(|frame| frame.account);
@@ -228,7 +257,7 @@ impl QrLogin {
             if !self.current(generation) {
                 return Err("登录请求已取消。".into());
             }
-            let value = match frame(app, platform).await {
+            let value = match frame(app, platform, false).await {
                 Ok(value) => value,
                 Err(_) => continue,
             };
@@ -292,7 +321,7 @@ impl QrLogin {
             .filter(|pending| pending.platform == platform && pending.qr.id == id)
             .cloned()
             .ok_or("登录请求已取消，请重新获取二维码。")?;
-        let value = frame(app, platform).await?;
+        let value = frame(app, platform, false).await?;
         if !self.current(pending.generation) {
             return Err("登录请求已取消。".into());
         }
@@ -332,7 +361,7 @@ impl QrLogin {
         }))
     }
 
-    pub async fn check(&self, app: &AppHandle, platform: Platform) -> Result<bool, String> {
+    pub async fn check(&self, app: &AppHandle, platform: Platform) -> Result<LoginCheck, String> {
         self.cancel(app, platform);
         let generation = {
             let mut inner = self.inner.lock().unwrap();
@@ -341,14 +370,33 @@ impl QrLogin {
             inner.pending = None;
             inner.generation
         };
+        let state = app.state::<Arc<AppState>>();
+        // Serialize checks with profile clearing so a cancelled check cannot put
+        // cookies back after an explicit logout.
+        let _profile = state.site_sessions.checking_guard(platform).await?;
+        if !self.current(generation) {
+            return Err("登录检查已取消。".into());
+        }
         let window = site_sessions::login_window(app, platform)?;
+        state
+            .site_sessions
+            .restore_missing(app, platform, || self.current(generation))
+            .await?;
+        let saved = state.site_sessions.cookie(platform);
+        let live = site_sessions::capture(app, platform).await?;
+        if !has_account_cookie(platform, &saved) && !has_account_cookie(platform, &live) {
+            return Ok(LoginCheck::new(
+                "loggedout",
+                "尚未保存此平台的登录状态，请先扫码登录。",
+            ));
+        }
         window
             .navigate(platform.home().parse().unwrap())
             .map_err(|_| "无法检查平台登录状态。")?;
         let result = async {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(18);
             let started = tokio::time::Instant::now();
-            let mut confirmed_frames = 0;
+            let mut evidence=CheckEvidence::default();
             for _ in 0..25 {
                 if tokio::time::Instant::now() >= deadline {
                     break;
@@ -357,32 +405,19 @@ impl QrLogin {
                 if !self.current(generation) {
                     return Err("登录检查已取消。".into());
                 }
-                let value = match frame(app, platform).await {
+                let value = match frame(app, platform,true).await {
                     Ok(value) => value,
-                    Err(_) => continue,
+                    Err(_) => {evidence.observe("loading",started.elapsed());continue;},
                 };
-                if value.state == "confirmed" {
-                    confirmed_frames += 1;
-                    if started.elapsed() < Duration::from_secs(3) || confirmed_frames < 2 {
-                        continue;
-                    }
+                if evidence.observe(&value.state,started.elapsed()) {
                     self.complete(app, platform, generation).await?;
-                    return Ok(true);
-                }
-                confirmed_frames = 0;
-                if valid_image(&value.image) || value.state == "expired" {
-                    let inner = self.inner.lock().unwrap();
-                    if inner.generation != generation {
-                        return Err("登录检查已取消。".into());
-                    }
-                    app.state::<Arc<AppState>>().site_sessions.clear(platform)?;
-                    return Ok(false);
+                    return Ok(LoginCheck::new("authenticated","登录状态有效。"));
                 }
                 if value.state == "verification" {
-                    return Err("平台暂时要求验证，无法确认登录状态，请稍后重试。".into());
+                    return Ok(LoginCheck::new("unknown","平台暂时要求验证，尚无法确认登录，已保留原有账号和会话，请稍后重试。"));
                 }
             }
-            Err("暂时无法确认登录状态，已保留保存的账号，请检查网络后重试。".into())
+            Ok(LoginCheck::new("unknown","暂时无法确认登录状态，原有账号和会话已保留。请检查网络后重试；如解析也要求登录，可重新扫码。"))
         }
         .await;
         if self.current(generation) {
@@ -395,6 +430,24 @@ impl QrLogin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn checks_require_stable_positive_account_evidence_never_qr_expiration() {
+        let mut evidence = CheckEvidence::default();
+        for state in [
+            "loading",
+            "waiting",
+            "expired",
+            "verification",
+            "login-required",
+        ] {
+            assert!(!evidence.observe(state, Duration::from_secs(10)));
+        }
+        assert!(!evidence.observe("confirmed", Duration::from_secs(1)));
+        assert!(!evidence.observe("confirmed", Duration::from_secs(2)));
+        assert!(!evidence.observe("loading", Duration::from_secs(4)));
+        assert!(!evidence.observe("confirmed", Duration::from_secs(5)));
+        assert!(evidence.observe("confirmed", Duration::from_secs(6)));
+    }
     #[test]
     fn qr_images_are_bounded_raster_data_not_remote_or_active_content() {
         assert!(!valid_image("https://example.test/qr.png"));

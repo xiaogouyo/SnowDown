@@ -2,6 +2,7 @@
 // This never reads form values, cookies, input text, or general page state.
 (() => {
   const platform = __PLATFORM__;
+  const checkOnly = __CHECK_ONLY__;
   const visible = node => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 && getComputedStyle(node).visibility !== 'hidden'; };
   const nodes = [...document.querySelectorAll('img,canvas')].filter(visible);
   const candidate = nodes.find(node => {
@@ -30,7 +31,7 @@
   const profile = platform === 'xiaohongshu'
     ? [...document.querySelectorAll('a[href*="/user/profile/"]')].some(node => visible(node) && /^\/user\/profile\/[a-f\d]{24}(?:$|[/?])/i.test(node.getAttribute('href')) && /^(我|我的|个人主页)$/.test(node.textContent.trim()))
     : !![...document.querySelectorAll('header a[href*="/user/"],[data-e2e="user-avatar"],[data-e2e="user-info"]')].find(visible);
-  if (profile && !candidate && !loginButton && document.readyState !== 'loading') {
+  if (profile && (checkOnly || !candidate) && !loginButton && document.readyState !== 'loading') {
     const root = platform === 'xiaohongshu'
       ? [...document.querySelectorAll('a[href*="/user/profile/"]')].find(node => /^(我|我的|个人主页)$/.test(node.textContent.trim()))
       : document.querySelector('[data-e2e="user-avatar"],[data-e2e="user-info"],header a[href*="/user/"]');
@@ -39,6 +40,9 @@
     const name = root?.getAttribute('title') || img?.getAttribute('alt') || '';
     return JSON.stringify({state:'confirmed',...(avatar ? {account:{name:name.slice(0,80),avatar}} : {})});
   }
+  // A QR code (including an expired one) says nothing about saved account cookies.
+  // Checking never opens a login dialog or performs a QR refresh.
+  if (checkOnly) return JSON.stringify({state:loginButton || candidate ? 'login-required' : 'loading'});
   if (/已过期|已失效|二维码失效|二维码过期/.test(text)) return JSON.stringify({state:'expired'});
   if (!candidate && /扫码成功|扫描成功|请在.{0,12}确认|已扫码/.test(text)) return JSON.stringify({state:'scanned'});
   let image = '';

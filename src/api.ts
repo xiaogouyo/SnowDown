@@ -11,7 +11,7 @@ export async function getSnapshot(): Promise<AppSnapshot> {
     tasks: [],
     settings: { downloadDir: '', concurrency: 2, downloadConnections: 8, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
     siteSessions: [],
-    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.2.0',
+    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.2.1',
   }
   return invoke('get_snapshot')
 }
@@ -49,7 +49,7 @@ export async function beginLogin(platform: Platform = 'bilibili'): Promise<Login
 export async function pollLogin(id: string, platform: Platform = 'bilibili'): Promise<LoginPoll> { requireDesktop(); return invoke('poll_login', { id, platform }) }
 export async function cancelLogin(platform: Platform = 'bilibili'): Promise<void> { if (desktop) await invoke('cancel_login', { platform }) }
 export async function logout(platform: Platform = 'bilibili'): Promise<void> { requireDesktop(); await invoke('logout', { platform }) }
-export async function checkLogin(platform: Platform = 'bilibili'): Promise<void> { requireDesktop(); await invoke('check_login', { platform }) }
+export async function checkLogin(platform: Platform = 'bilibili'): Promise<{state:'authenticated'|'loggedout'|'unknown';message:string}> { requireDesktop(); return invoke('check_login', { platform }) }
 export async function readClipboardLink(): Promise<SourceLink | null> { requireDesktop(); return invoke('read_clipboard_link') }
 export async function getClipboardStatus(): Promise<ClipboardSnapshot> { requireDesktop(); return invoke('clipboard_status') }
 export async function acknowledgeClipboard(id: number): Promise<void> { requireDesktop(); await invoke('acknowledge_clipboard', { id }) }

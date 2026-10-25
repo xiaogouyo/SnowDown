@@ -1,13 +1,29 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import script from '../src-tauri/src/site_qr.js?raw'
 
-function read(platform = 'douyin') { return JSON.parse(window.eval(script.replace('__PLATFORM__', JSON.stringify(platform)))) }
+function read(platform = 'douyin',checkOnly=false) { return JSON.parse(window.eval(script.replace('__PLATFORM__', JSON.stringify(platform)).replace('__CHECK_ONLY__',JSON.stringify(checkOnly)))) }
 function visibleElements() {
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ width: 180, height: 180, top: 0, left: 0, bottom: 180, right: 180, x: 0, y: 0, toJSON() {} })
 }
 const qr = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=='
 afterEach(() => { document.body.innerHTML = ''; vi.restoreAllMocks(); vi.useRealTimers(); delete (window as unknown as Record<string, unknown>).__snowdownQrRequested })
 describe('official QR capture boundaries', () => {
+  it('checks passively without clicking login or refreshing an expired QR',()=>{
+    visibleElements();document.body.innerHTML='<button>登录</button>';
+    const login=vi.spyOn(document.querySelector('button')!,'click');
+    expect(read('xiaohongshu',true)).toEqual({state:'login-required'});
+    expect(login).not.toHaveBeenCalled();
+    document.body.innerHTML=`<div class="qrcode"><img class="qrcode-img" src="${qr}"><p>二维码已过期</p><button>刷新</button></div>`;
+    const refresh=vi.spyOn(document.querySelector('button')!,'click');
+    expect(read('xiaohongshu',true)).toEqual({state:'login-required'});
+    expect(refresh).not.toHaveBeenCalled();
+  })
+  it('confirms the own-account control even if an unrelated app QR is visible during checks',()=>{
+    visibleElements();document.body.innerHTML=`<a href="/user/profile/1234567890abcdef12345678">我</a><img class="qrcode" src="${qr}">`;
+    expect(read('xiaohongshu',true).state).toBe('confirmed');
+    document.body.innerHTML=`<a href="/user/profile/1234567890abcdef12345678">笔记作者</a>`;
+    expect(read('xiaohongshu',true).state).toBe('loading');
+  })
   it('captures only the logged-in account avatar and name',()=>{
     visibleElements();document.body.innerHTML='<header><a href="/user/self" title="我的账号"><img src="https://p3.douyinpic.com/avatar.jpg" alt="头像"></a></header><img src="https://unrelated.test/author.jpg">';
     expect(read()).toMatchObject({state:'confirmed',account:{name:'我的账号',avatar:'https://p3.douyinpic.com/avatar.jpg'}})

@@ -209,6 +209,7 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
         #[cfg(debug_assertions)]
         if std::env::var_os("SNOWDOWN_CLIPBOARD_VERIFY").is_some()
             || std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some()
+            || std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some()
         {
             return;
         }

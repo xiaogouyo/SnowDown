@@ -426,7 +426,8 @@ async fn dispatch(app: &AppHandle, state: &AppState, request: &Value) -> Result<
                     }) {
                         Err("浏览器尚未登录。".into())
                     } else {
-                        state.site_sessions.import_browser(app,platform, cookie).map(|_| {
+                        state.qr_login.cancel(app, platform);
+                        state.site_sessions.import_browser(app,platform, cookie).await.map(|_| {
                             if let Ok(profile) = serde_json::from_value::<site_sessions::Profile>(
                                 session["account"].clone(),
                             ) {

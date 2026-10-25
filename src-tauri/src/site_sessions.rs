@@ -20,6 +20,56 @@ pub struct Profile {
     pub name: String,
     pub avatar: String,
 }
+fn auth_cookie_name(name: &str) -> bool {
+    matches!(
+        name,
+        "web_session"
+            | "web_session_ssl"
+            | "sessionid"
+            | "sessionid_ss"
+            | "sid_tt"
+            | "sid_guard"
+            | "SESSDATA"
+    )
+}
+fn cookie_pairs(value: &str) -> Vec<(&str, &str)> {
+    value
+        .split(';')
+        .filter_map(|part| part.trim().split_once('='))
+        .filter(|(key, value)| {
+            !key.is_empty()
+                && key.len() <= 256
+                && !value.chars().any(char::is_control)
+                && key
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
+        })
+        .collect()
+}
+fn restore_plan(
+    platform: Platform,
+    saved: &str,
+    live: &str,
+) -> Vec<tauri::webview::Cookie<'static>> {
+    let domain = if platform == Platform::Douyin {
+        ".douyin.com"
+    } else {
+        ".xiaohongshu.com"
+    };
+    let existing = cookie_pairs(live);
+    cookie_pairs(saved)
+        .into_iter()
+        .filter(|(key, _)| !existing.iter().any(|(current, _)| current == key))
+        .map(|(key, value)| {
+            tauri::webview::Cookie::build((key.to_string(), value.to_string()))
+                .domain(domain)
+                .path("/")
+                .secure(true)
+                .http_only(auth_cookie_name(key))
+                .build()
+        })
+        .collect()
+}
 impl Profile {
     pub fn sanitized(self) -> Self {
         let avatar = url::Url::parse(if self.avatar.len() <= 4096 {
@@ -77,6 +127,34 @@ struct Observed {
 }
 
 impl Sessions {
+    pub async fn checking_guard(
+        &self,
+        platform: Platform,
+    ) -> Result<tokio::sync::MutexGuard<'_, ()>, String> {
+        let index = match platform {
+            Platform::Douyin => 0,
+            Platform::Xiaohongshu => 1,
+            _ => return Err("B站使用专用登录模块。".into()),
+        };
+        Ok(self.parsers[index].lock().await)
+    }
+    pub async fn restore_missing(
+        &self,
+        app: &AppHandle,
+        platform: Platform,
+        current: impl Fn() -> bool,
+    ) -> Result<(), String> {
+        let saved = self.cookie(platform);
+        if saved.is_empty() {
+            return Ok(());
+        }
+        let window = login_window(app, platform)?;
+        let live = capture(app, platform).await?;
+        if !current() {
+            return Err("登录检查已取消。".into());
+        }
+        crate::web_capture::restore_cookies(&window, restore_plan(platform, &saved, &live)).await
+    }
     pub fn open(directory: PathBuf) -> Self {
         let mut cookies = HashMap::new();
         let mut profiles = HashMap::new();
@@ -318,7 +396,7 @@ impl Sessions {
         self.profiles.lock().unwrap().insert(platform, profile);
         Ok(())
     }
-    pub fn import_browser(
+    pub async fn import_browser(
         &self,
         app: &AppHandle,
         platform: Platform,
@@ -330,33 +408,9 @@ impl Sessions {
         if platform == Platform::Bilibili {
             return Err("B站使用专用登录模块。".into());
         }
+        let _guard = self.checking_guard(platform).await?;
         let window = login_window(app, platform)?;
-        let domain = if platform == Platform::Douyin {
-            ".douyin.com"
-        } else {
-            ".xiaohongshu.com"
-        };
-        for part in cookie.split(';') {
-            if let Some((key, value)) = part.trim().split_once('=') {
-                if key.is_empty()
-                    || key.len() > 256
-                    || !key
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
-                {
-                    continue;
-                }
-                let cookie = tauri::webview::Cookie::build((key.to_string(), value.to_string()))
-                    .domain(domain)
-                    .path("/")
-                    .secure(true)
-                    .http_only(true)
-                    .build();
-                window
-                    .set_cookie(cookie)
-                    .map_err(|_| "无法导入平台浏览器会话。")?;
-            }
-        }
+        crate::web_capture::restore_cookies(&window, restore_plan(platform, &cookie, "")).await?;
         self.save(platform, cookie)
     }
 
@@ -684,6 +738,40 @@ pub async fn capture(app: &AppHandle, platform: Platform) -> Result<String, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn restored_cookies_keep_live_values_and_the_platform_script_tokens_visible() {
+        let plan = restore_plan(
+            Platform::Xiaohongshu,
+            "web_session=saved; a1=old; csrfToken=saved-csrf",
+            "a1=current; extra=current",
+        );
+        assert_eq!(plan.len(), 2);
+        let session = plan.iter().find(|c| c.name() == "web_session").unwrap();
+        assert_eq!(session.value(), "saved");
+        assert_eq!(session.http_only(), Some(true));
+        assert_eq!(session.path(), Some("/"));
+        let csrf = plan.iter().find(|c| c.name() == "csrfToken").unwrap();
+        assert_eq!(csrf.http_only(), Some(false));
+        assert!(!plan.iter().any(|c| c.name() == "a1"));
+        let dy = restore_plan(Platform::Douyin, "sessionid=auth; msToken=js-token", "");
+        assert_eq!(
+            dy.iter()
+                .find(|c| c.name() == "sessionid")
+                .unwrap()
+                .http_only(),
+            Some(true)
+        );
+        assert_eq!(
+            dy.iter()
+                .find(|c| c.name() == "msToken")
+                .unwrap()
+                .http_only(),
+            Some(false)
+        );
+        assert!(
+            restore_plan(Platform::Xiaohongshu, "web_session=old", "web_session=new").is_empty()
+        );
+    }
     #[test]
     fn observed_details_keep_only_matching_video_metadata_in_memory() {
         let sessions = Sessions::open(
