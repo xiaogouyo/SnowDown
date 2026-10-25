@@ -20,6 +20,7 @@ use tokio::{
 pub const ID: &str = "dbhbjidcgjfmcoepcechajmoofdelkno";
 const HOST: &str = "app.snowdown.bridge";
 const MAX: usize = 512 * 1024;
+static BINDING_WRITE: Mutex<()> = Mutex::new(());
 #[derive(Default)]
 pub struct Bridge {
     clients: Mutex<HashMap<String, Instant>>,
@@ -38,6 +39,11 @@ struct Endpoint {
     token: String,
 }
 fn root() -> PathBuf {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("SNOWDOWN_EXTENSION_EXPORT_VERIFY").is_some() {
+        return PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../.tools/extension-export-bridge-qa");
+    }
     #[cfg(debug_assertions)]
     if std::env::var_os("SNOWDOWN_BROWSER_VERIFY").is_some() {
         return PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -206,16 +212,7 @@ pub fn install(app: &AppHandle, id: &str) -> Result<String, String> {
         Ok(())
     }
     copy(&source, &directory)?;
-    let path = root().join("bindings.json");
-    let mut bindings: HashMap<String, String> = std::fs::read(&path)
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default();
-    bindings
-        .entry(id.into())
-        .or_insert_with(|| uuid::Uuid::new_v4().to_string());
-    std::fs::write(path, serde_json::to_vec(&bindings).unwrap())
-        .map_err(|_| "无法保存绑定配置。")?;
+    ensure_bindings(&[id])?;
     std::process::Command::new(executable)
         .arg(if id == "chrome" {
             "chrome://extensions/"
@@ -228,6 +225,30 @@ pub fn install(app: &AppHandle, id: &str) -> Result<String, String> {
         .open_path(directory.to_string_lossy().to_string(), None::<&str>)
         .map_err(|_| "无法打开插件目录。")?;
     Ok(directory.to_string_lossy().into_owned())
+}
+fn ensure_bindings(ids: &[&str]) -> Result<(), String> {
+    let _guard = BINDING_WRITE.lock().unwrap();
+    std::fs::create_dir_all(root()).map_err(|_| "无法创建联动目录。")?;
+    let path = root().join("bindings.json");
+    let mut bindings: HashMap<String, String> = std::fs::read(&path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    for id in ids {
+        bindings
+            .entry((*id).into())
+            .or_insert_with(|| uuid::Uuid::new_v4().to_string());
+    }
+    std::fs::write(path, serde_json::to_vec(&bindings).unwrap())
+        .map_err(|_| "无法保存绑定配置。")?;
+    Ok(())
+}
+pub fn prepare_zip_bindings() -> Result<(), String> {
+    let ids: Vec<_> = ["chrome", "edge"]
+        .into_iter()
+        .filter(|id| browser(id).is_some())
+        .collect();
+    ensure_bindings(&ids)
 }
 pub fn native_host() -> bool {
     let args = std::env::args().collect::<Vec<_>>();

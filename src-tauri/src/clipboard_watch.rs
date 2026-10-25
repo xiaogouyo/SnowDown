@@ -211,6 +211,7 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
             || std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some()
             || std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some()
             || std::env::var_os("SNOWDOWN_MODE_MORPH_VERIFY").is_some()
+            || std::env::var_os("SNOWDOWN_EXTENSION_EXPORT_VERIFY").is_some()
         {
             return;
         }

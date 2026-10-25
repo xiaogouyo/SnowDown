@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { AppSnapshot, CreateTaskRequest, CreateBatchRequest, BatchResult, Settings, VideoInfo, LoginQr, LoginPoll, Platform, SourceLink, UpdateStatus, ClipboardSnapshot } from './types'
 
@@ -11,7 +11,7 @@ export async function getSnapshot(): Promise<AppSnapshot> {
     tasks: [],
     settings: { downloadDir: '', concurrency: 2, downloadConnections: 8, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
     siteSessions: [],
-    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.2.2',
+    mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.2.3',
   }
   return invoke('get_snapshot')
 }
@@ -103,6 +103,11 @@ export async function installUpdate(): Promise<void> { requireDesktop(); await i
 export async function dismissUpdateNotice(): Promise<void> { requireDesktop(); await invoke('dismiss_update_notice') }
 export async function browserStatus(): Promise<{id:string;name:string;installed:boolean;connected:boolean}[]> { requireDesktop(); return invoke('browser_status') }
 export async function installBrowserExtension(browser:string): Promise<string> { requireDesktop(); return invoke('install_browser_extension',{browser}) }
+export async function saveBrowserExtensionZip(): Promise<string | null> {
+  requireDesktop()
+  const path = await save({ title: '保存插件 ZIP', defaultPath: 'SnowDown_BrowserExtension_0.1.0.zip', filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }] })
+  return path ? invoke('export_browser_extension_zip', { path }) : null
+}
 export async function openUpdateRelease(): Promise<void> { requireDesktop(); await invoke('open_update_release') }
 export async function subscribeUpdates(callback: (status: UpdateStatus) => void): Promise<() => void> {
   if (!desktop) return () => {}

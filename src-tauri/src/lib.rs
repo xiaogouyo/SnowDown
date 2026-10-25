@@ -11,6 +11,9 @@ mod clipboard_watch;
 #[cfg(debug_assertions)]
 mod debug_probe;
 mod engine;
+mod extension_package;
+#[cfg(all(debug_assertions, windows))]
+mod extension_package_probe;
 #[cfg(all(debug_assertions, windows))]
 mod login_check_probe;
 #[cfg(debug_assertions)]
@@ -176,6 +179,22 @@ fn browser_status(state: State<'_, Arc<AppState>>) -> Vec<browser_bridge::Browse
 #[tauri::command]
 fn install_browser_extension(app: AppHandle, browser: String) -> Result<String, String> {
     browser_bridge::install(&app, &browser)
+}
+#[tauri::command]
+async fn export_browser_extension_zip(app: AppHandle, path: String) -> Result<String, String> {
+    let source = app
+        .path()
+        .resource_dir()
+        .map_err(|_| "插件资源不可用。")?
+        .join("resources/browser-extension");
+    tauri::async_runtime::spawn_blocking(move || {
+        extension_package::export(&source, std::path::Path::new(&path)).map(|p| {
+            let _ = browser_bridge::prepare_zip_bindings();
+            p.to_string_lossy().into_owned()
+        })
+    })
+    .await
+    .map_err(|_| "导出插件 ZIP 失败。".to_string())?
 }
 
 pub fn native_browser_host() -> bool {
@@ -618,6 +637,10 @@ pub fn run() {
             #[cfg(debug_assertions)]
             let data_dir = if std::env::var_os("SNOWDOWN_QR_VERIFY").is_some() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tools/qr-qa-app-data")
+            } else if std::env::var_os("SNOWDOWN_EXTENSION_EXPORT_VERIFY").is_some() {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../.tools/extension-export-qa")
+                    .join(uuid::Uuid::new_v4().to_string())
             } else if std::env::var_os("SNOWDOWN_MODE_MORPH_VERIFY").is_some() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("../.tools/mode-morph-qa")
@@ -654,6 +677,7 @@ pub fn run() {
                 || std::env::var_os("SNOWDOWN_BROWSER_VERIFY").is_some()
                 || std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some()
                 || std::env::var_os("SNOWDOWN_MODE_MORPH_VERIFY").is_some()
+                || std::env::var_os("SNOWDOWN_EXTENSION_EXPORT_VERIFY").is_some()
             {
                 data_dir.join("media")
             } else {
@@ -704,7 +728,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             let browser_test = std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some()
                 || std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some()
-                || std::env::var_os("SNOWDOWN_MODE_MORPH_VERIFY").is_some();
+                || std::env::var_os("SNOWDOWN_MODE_MORPH_VERIFY").is_some()
+                || std::env::var_os("SNOWDOWN_EXTENSION_EXPORT_VERIFY").is_some();
             #[cfg(not(debug_assertions))]
             let browser_test = false;
             if !browser_test {
@@ -723,7 +748,10 @@ pub fn run() {
                 }
             });
             #[cfg(debug_assertions)]
-            if std::env::var_os("SNOWDOWN_MODE_MORPH_VERIFY").is_some() {
+            if std::env::var_os("SNOWDOWN_EXTENSION_EXPORT_VERIFY").is_some() {
+                #[cfg(windows)]
+                extension_package_probe::start(handle.clone());
+            } else if std::env::var_os("SNOWDOWN_MODE_MORPH_VERIFY").is_some() {
                 #[cfg(windows)]
                 mode_morph_probe::start(handle.clone());
             } else if std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some() {
@@ -807,6 +835,7 @@ pub fn run() {
             dismiss_update_notice,
             browser_status,
             install_browser_extension,
+            export_browser_extension_zip,
             open_update_release,
             inspect_video,
             create_tasks,

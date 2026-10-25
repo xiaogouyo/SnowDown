@@ -2,12 +2,12 @@
 
 Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红书视频。采用 Tauri 2、Vue 3、TypeScript 与 Rust，下载文件在本机处理和保存。
 
-## 下载 v0.2.2
+## 下载 v0.2.3
 
-- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.2/SnowDown_0.2.2_x64-setup.exe)
-- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.2/SnowDown_0.2.2_Windows_x64_portable.zip)
-- [浏览器插件 v0.1.0](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.2/SnowDown_BrowserExtension_0.1.0.zip)
-- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.2)
+- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.3/SnowDown_0.2.3_x64-setup.exe)
+- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.3/SnowDown_0.2.3_Windows_x64_portable.zip)
+- [浏览器插件 v0.1.0](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.3/SnowDown_BrowserExtension_0.1.0.zip)
+- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.3)
 
 需要 Windows 10/11 x64 和 WebView2 运行时。免安装版请完整解压后启动，保留 `resources` 文件夹。下载文件的 SHA256 校验值随 Release 提供。
 
@@ -49,6 +49,8 @@ v0.2.1 修复小红书检查登录误清会话：检查不会主动打开扫码�
 ## 浏览器插件
 
 桌面端左侧新增插件贴片，可检测 Chrome / Edge、准备插件目录并绑定；插件独立版本为 v0.1.0。浏览器首次需开启开发者模式并确认“加载已解压的扩展”，当前未上架商店，不能静默安装。详细的安装、权限、独立下载、桌面联动与隐私说明见 [插件使用说明](extension/README.md)。软件离线时插件自动回退浏览器下载，重新打开后恢复连接。
+
+v0.2.3 可在插件面板直接“下载 ZIP”，从内置资源离线生成本地安装包；联动安装失败也可使用。解压后在浏览器扩展管理页加载包含 manifest.json 的文件夹。安装教学改为五步图标流程，悬停或键盘聚焦图标可查看提示。上一版动画更新已统一归档为 v0.2.2；此前安装过误标 v0.2.3 动画版的用户，需要手动覆盖安装新 v0.2.3 一次。
 
 更新下载并校验后会在右下角提示；点击“安装更新”会保存进度、自动覆盖安装并重启。只清理更新包、缓存和文件清单中的旧程序文件，登录、下载、任务和设置保留。抖音、小红书账号头像可在登录、检查登录或浏览器同步时读取。
 
