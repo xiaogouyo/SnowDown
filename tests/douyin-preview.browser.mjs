@@ -5,7 +5,7 @@ import {execFileSync} from 'node:child_process';
 import path from 'node:path';import assert from 'node:assert/strict';
 const {chromium}=await import(process.env.SNOWDOWN_PLAYWRIGHT_PATH?pathToFileURL(process.env.SNOWDOWN_PLAYWRIGHT_PATH).href:'playwright');
 const out=path.resolve('.tools/v029-preview-qa'),extension=path.resolve('src-tauri/resources/browser-extension');await mkdir(path.join(out,'downloads'),{recursive:true});
-const context=await chromium.launchPersistentContext(path.join(out,'profile-'+Date.now()),{channel:'chromium',headless:true,viewport:{width:1400,height:950},args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`]});
+const context=await chromium.launchPersistentContext(path.join(out,'profile-'+Date.now()),{channel:'chromium',headless:true,viewport:{width:1400,height:950},args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`]});context.setDefaultTimeout(12000);
 const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker'),first='1234567890123456789',second='9876543210987654321',errors=[];
 context.on('page',page=>page.on('pageerror',error=>errors.push(error.stack)));
 await worker.evaluate(()=>chrome.storage.local.set({preferDesktop:false,syncAccounts:false,floatingEnabled:true}));
@@ -42,8 +42,8 @@ try{
  await worker.evaluate(()=>{globalThis.__previewScriptCalls=0;const original=chrome.scripting.executeScript;chrome.scripting.executeScript=function(...args){globalThis.__previewScriptCalls++;return original.apply(this,args)}});
  for(let i=0;i<20;i++){await page.evaluate(i=>document.querySelector('.scroll').scrollTop=50+i,i);await page.waitForTimeout(18)}
  const scrollCalls=await worker.evaluate(()=>globalThis.__previewScriptCalls);assert.ok(scrollCalls<=4,`Excessive discovery while scrolling: ${scrollCalls}`);
- await page.evaluate(()=>document.querySelector('.scroll').scrollTop=150);await page.waitForFunction(()=>document.querySelector('snowdown-preview-helper')?.style.visibility==='hidden');
- await page.evaluate(()=>document.querySelector('.scroll').scrollTop=430);await page.waitForFunction(()=>[...document.querySelectorAll('snowdown-preview-helper')].filter(node=>node.style.visibility==='visible').length===1);
+ await page.evaluate(()=>document.querySelector('.scroll').scrollTop=150);await page.waitForFunction(()=>{const h=document.querySelector('snowdown-preview-helper');if(!h)return true;const r=h.getBoundingClientRect();return document.elementFromPoint(r.left+15,r.top+15)!==h});
+ await page.evaluate(()=>document.querySelector('.scroll').scrollTop=430);await page.waitForFunction(()=>[...document.querySelectorAll('snowdown-preview-helper')].filter(node=>{const r=node.getBoundingClientRect();return document.elementFromPoint(r.left+15,r.top+15)===node}).length===1);
  await page.waitForTimeout(650);const bg=await content(tab.id,'preview-parse',{url:`https://www.douyin.com/video/${second}`});assert.equal(bg.ok,true,bg.error);assert.equal(bg.data.title,'预览 B');
  await page.evaluate(()=>document.querySelector('.cover').__reactFiber$test.memoizedProps.awemeInfo.awemeId='1111111111111111111');const stale=await content(tab.id,'preview-download',{id:ticket.data.id,index:0,kind:'video'});assert.equal(stale.ok,false);
  await page.goto('https://www.douyin.com/search/fixture');await page.waitForFunction(()=>window.__snowdownMediaDetails?.length>0);await openFirst(page);assert.equal(await page.evaluate(()=>JSON.stringify(window.__snowdownMediaDetails).includes('not copied')),false);

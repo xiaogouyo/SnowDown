@@ -3,7 +3,7 @@ import {pathToFileURL} from 'node:url';import path from 'node:path';import asser
 const {chromium}=await import(process.env.SNOWDOWN_PLAYWRIGHT_PATH?pathToFileURL(process.env.SNOWDOWN_PLAYWRIGHT_PATH).href:'playwright');
 const out=path.resolve('.tools/v028-preview-qa'),extension=path.resolve('src-tauri/resources/browser-extension');await mkdir(path.join(out,'downloads'),{recursive:true});
 const context=await chromium.launchPersistentContext(path.join(out,'profile-'+Date.now()),{channel:'chromium',headless:true,viewport:{width:1440,height:900},args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`]});
-const errors=[];context.on('page',p=>p.on('pageerror',e=>errors.push(e.message)));
+context.setDefaultTimeout(12000);const errors=[];context.on('page',p=>p.on('pageerror',e=>errors.push(e.message)));
 const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker'),id=worker.url().split('/')[2],origin=`chrome-extension://${id}`;
 await worker.evaluate(()=>chrome.storage.local.set({syncAccounts:false,preferDesktop:false,floatingEnabled:true}));
 const media=await readFile('.tools/v024-fixture.mp4'),cover=await readFile('extension/icons/128.png'),ids=['BV17x411w7KC','BV1xx411c7mD'];
