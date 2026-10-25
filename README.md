@@ -2,12 +2,14 @@
 
 Windows 桌面视频下载工具，支持B站，并试验接入抖音、小红书视频。采用 Tauri 2、Vue 3、TypeScript 与 Rust，下载文件在本机处理和保存。
 
-## 下载 v0.2.6
+## 下载 v0.2.7
 
-- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.6/SnowDown_0.2.6_x64-setup.exe)
-- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.6/SnowDown_0.2.6_Windows_x64_portable.zip)
-- [浏览器插件 v0.1.3](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.6/SnowDown_BrowserExtension_0.1.3.zip)
-- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.6)
+本版为安装更新紧急修复：解决旧版安装成功后误报文件校验失败。已经遇到该错误的用户可完全退出软件后覆盖安装到原目录，无需卸载，保留登录状态、设置和下载内容。浏览器插件保持 v0.1.3。
+
+- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.7/SnowDown_0.2.7_x64-setup.exe)
+- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.7/SnowDown_0.2.7_Windows_x64_portable.zip)
+- [浏览器插件 v0.1.3](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.7/SnowDown_BrowserExtension_0.1.3.zip)
+- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.7)
 
 需要 Windows 10/11 x64 和 WebView2 运行时。免安装版请完整解压后启动，保留 `resources` 文件夹。下载文件的 SHA256 校验值随 Release 提供。
 
@@ -48,7 +50,7 @@ v0.2.1 修复小红书检查登录误清会话：检查不会主动打开扫码�
 
 ## 浏览器插件
 
-独立插件 v0.1.3 修复抖音精选页读取，支持自由拖动悬浮球和卡片标题栏、保存位置、边界约束、关闭提醒的退出动画，以及细圆角滚动条。桌面 v0.2.6 已内置 v0.1.3，也可从上方插件 ZIP 单独更新。
+独立插件 v0.1.3 修复抖音精选页读取，支持自由拖动悬浮球和卡片标题栏、保存位置、边界约束、关闭提醒的退出动画，以及细圆角滚动条。桌面 v0.2.7 已内置 v0.1.3，也可从上方插件 ZIP 单独更新。
 
 桌面 v0.2.4 曾内置插件 v0.1.1：新标签页适配完整窗口，新增右侧视频悬浮球和原位展开的下载设置卡片。提醒可在插件设置关闭；三平台默认支持，其他网页需授权。插件更新后在扩展管理页刷新一次，已有视频页面也可刷新。
 

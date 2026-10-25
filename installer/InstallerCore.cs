@@ -123,19 +123,33 @@ namespace SnowDown.Setup
             string manifest;
             using (Stream source = Assembly.GetExecutingAssembly().GetManifestResourceStream("SnowDown.Manifest"))
             using (StreamReader reader = new StreamReader(source, Encoding.UTF8)) manifest = reader.ReadToEnd();
-            Dictionary<string,string> expected = ParseManifest(manifest);
-            if (expected.Count < 5) throw new IOException("程序文件清单无效，请重新下载安装包。");
-            foreach (KeyValuePair<string,string> entry in expected)
-            {
-                string path = OwnedPath(directory,entry.Key);
-                if (path == null || !File.Exists(path)) throw new IOException("安装文件不完整，请重试。");
-                using (FileStream file = File.OpenRead(path)) if (Hash(file) != entry.Value) throw new IOException("安装文件校验未通过，请重试。");
-            }
+            VerifyManifest(directory, manifest);
             PruneObsolete(directory,previous,manifest);
             string destination = Path.Combine(directory,ManifestName);
             string temporary = destination + ".tmp";
             File.WriteAllText(temporary,manifest,Encoding.UTF8);
             if (File.Exists(destination)) File.Replace(temporary,destination,null); else File.Move(temporary,destination);
+        }
+        internal static void VerifyManifest(string directory, string manifest)
+        {
+            Dictionary<string,string> expected = ParseManifest(manifest);
+            if (expected.Count < 5) throw new IOException("程序文件清单无效，请重新下载安装包。");
+            foreach (KeyValuePair<string,string> entry in expected)
+            {
+                string path = OwnedPath(directory,entry.Key);
+                if (path == null || !File.Exists(path))
+                {
+                    Log("Installed file missing or unsafe: " + entry.Key);
+                    throw new IOException("安装文件不完整：" + entry.Key + "，请重试。");
+                }
+                string actual;
+                using (FileStream file = File.OpenRead(path)) actual = Hash(file);
+                if (actual != entry.Value)
+                {
+                    Log("Installed file hash mismatch: " + entry.Key + "; expected=" + entry.Value + "; actual=" + actual);
+                    throw new IOException("安装文件校验未通过：" + entry.Key + "，请重试。");
+                }
+            }
         }
         internal static string UpdateDirectory(string[] args)
         {

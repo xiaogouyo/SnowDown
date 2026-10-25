@@ -128,7 +128,7 @@ try {
     & $taskCompiler /V2 "/X!addincludedir `"$taskGenerated`"" $taskAutoNsi
     if ($LASTEXITCODE -ne 0) { throw 'Auto payload compilation failed.' }
     $taskAutoWrapper = Join-Path $taskQaRoot 'auto-wrapper.exe'
-    & (Join-Path $taskRoot 'scripts\build-installer.ps1') -SkipTests -PayloadPath $taskAutoPayload -OutputPath $taskAutoWrapper -ProgramPath $taskAutoExe
+    & (Join-Path $taskRoot 'scripts\build-installer.ps1') -SkipTests -PayloadPath $taskAutoPayload -OutputPath $taskAutoWrapper
     $taskPrevious = Join-Path $taskInstall '.snowdown-program-files.v1'
     $taskOld = Join-Path $taskInstall 'resources\obsolete.dll'
     [IO.File]::WriteAllText($taskOld,'owned obsolete binary')

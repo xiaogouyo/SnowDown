@@ -1,4 +1,4 @@
-﻿param([switch]$SkipTests, [string]$PayloadPath, [string]$OutputPath, [string]$ProgramPath)
+﻿param([switch]$SkipTests, [string]$PayloadPath, [string]$OutputPath)
 $ErrorActionPreference = 'Stop'
 $taskRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $taskVersion = (Get-Content -LiteralPath (Join-Path $taskRoot 'package.json') -Raw | ConvertFrom-Json).version
@@ -30,15 +30,9 @@ internal const string PayloadHash = "$taskPayloadHash";
 "@ | Set-Content -LiteralPath $taskInfo -Encoding utf8
 $taskCore = Join-Path $taskRoot 'installer\InstallerCore.cs'
 $taskManifest = Join-Path $taskBuild 'program-files.v1'
-$taskOwnedFiles = @('snowdown.exe','resources/ffmpeg.exe','resources/FFMPEG-LICENSE.txt','resources/NOTICE.txt','resources/ffmpeg-build.json')
-$taskExtensionRoot=Join-Path $taskRoot 'src-tauri\resources\browser-extension'
-$taskOwnedFiles += @(Get-ChildItem -LiteralPath $taskExtensionRoot -Recurse -File | ForEach-Object { 'resources/browser-extension/' + $_.FullName.Substring($taskExtensionRoot.Length+1).Replace('\','/') })
-$taskManifestLines = @('SnowDown-owned-files-v1')
-foreach ($taskOwnedFile in $taskOwnedFiles) {
-    $taskOwnedSource = if ($taskOwnedFile -eq 'snowdown.exe') { if($ProgramPath){[IO.Path]::GetFullPath($ProgramPath)}else{Join-Path $taskRoot 'src-tauri\target\release\snowdown.exe'} } else { Join-Path $taskRoot ('src-tauri\' + $taskOwnedFile) }
-    $taskManifestLines += (Get-FileHash -LiteralPath $taskOwnedSource -Algorithm SHA256).Hash.ToLowerInvariant() + '|' + $taskOwnedFile
-}
-[IO.File]::WriteAllText($taskManifest,($taskManifestLines -join "`n") + "`n",(New-Object Text.UTF8Encoding($false)))
+# Tauri patches the executable's bundle-type marker while building NSIS, then
+# restores target/release/snowdown.exe. Only the payload contains the final bytes.
+& (Join-Path $PSScriptRoot 'write-installer-manifest.ps1') -PayloadPath $taskPayload -OutputPath $taskManifest
 if (-not $SkipTests) {
     $taskTests = Join-Path $taskBuild 'InstallerCoreTests.exe'
     & $taskCompiler /nologo /codepage:65001 /target:exe /platform:x64 /optimize+ "/out:$taskTests" $taskCore $taskInfo (Join-Path $taskRoot 'installer\InstallerCoreTests.cs')
@@ -64,4 +58,7 @@ $taskArguments += @(
 if ($LASTEXITCODE -ne 0) { throw 'Custom installer compilation failed.' }
 $taskVerified = Start-Process -FilePath $taskOutput -ArgumentList '--verify-payload' -PassThru -Wait -WindowStyle Hidden
 if ($taskVerified.ExitCode -ne 0) { throw 'Embedded payload integrity verification failed.' }
+if (-not $SkipTests) {
+    & (Join-Path $taskRoot 'tests\installer-payload.ps1') -InstallerPath $taskOutput
+}
 Get-Item -LiteralPath $taskOutput | Select-Object FullName,Length

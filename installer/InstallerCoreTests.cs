@@ -51,6 +51,32 @@ namespace SnowDown.Setup
             Check(InstallerCore.PruneObsolete(cleanup,old,"SnowDown-owned-files-v1\n"+digest+"|snowdown.exe\n")==1,"remove only unchanged obsolete program files");
             foreach(string file in new[]{"resources/modified.dll","Cookies","settings.json","video.mp4"})Check(File.Exists(Path.Combine(cleanup,file)),"preserve user data or modified file: "+file);
             Directory.Delete(cleanup,true);
+            string verification = Path.Combine(Path.GetTempPath(), "SnowDown-Verify-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(Path.Combine(verification, "resources"));
+            string verificationManifest = "SnowDown-owned-files-v1\n";
+            string[] verifiedFiles = { "snowdown.exe", "resources/ffmpeg.exe", "resources/NOTICE.txt", "resources/FFMPEG-LICENSE.txt", "resources/ffmpeg-build.json" };
+            string previousLog = InstallerCore.LogPath;
+            InstallerCore.LogPath = Path.Combine(verification, "setup.log");
+            try
+            {
+                foreach (string file in verifiedFiles)
+                {
+                    File.WriteAllText(Path.Combine(verification, file), "old", new UTF8Encoding(false));
+                    verificationManifest += digest + "|" + file + "\n";
+                }
+                InstallerCore.VerifyManifest(verification, verificationManifest);
+                Check(true, "matching payload files pass verification");
+                File.WriteAllText(Path.Combine(verification, "snowdown.exe"), "changed", new UTF8Encoding(false));
+                try { InstallerCore.VerifyManifest(verification, verificationManifest); throw new Exception("Accepted changed executable"); }
+                catch (IOException error) { Check(error.Message.Contains("snowdown.exe"), "hash failure identifies the exact file"); }
+                string diagnostic = File.ReadAllText(InstallerCore.LogPath);
+                Check(diagnostic.Contains("hash mismatch: snowdown.exe; expected=" + digest + "; actual="), "hash failure logs expected and actual digests");
+                File.WriteAllText(Path.Combine(verification, "snowdown.exe"), "old", new UTF8Encoding(false));
+                File.Delete(Path.Combine(verification, "resources", "NOTICE.txt"));
+                try { InstallerCore.VerifyManifest(verification, verificationManifest); throw new Exception("Accepted missing resource"); }
+                catch (IOException error) { Check(error.Message.Contains("resources/NOTICE.txt"), "missing file identifies the exact resource"); }
+            }
+            finally { InstallerCore.LogPath = previousLog; Directory.Delete(verification, true); }
             Console.WriteLine("Installer core: " + assertions + " assertions passed.");
             return 0;
         }
