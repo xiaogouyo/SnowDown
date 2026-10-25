@@ -1,6 +1,8 @@
-# SnowDown 浏览器插件 v0.1.6
+# SnowDown 浏览器插件 v0.1.7
 
 支持 Google Chrome / Microsoft Edge（Chromium 116 或更新版本）。这是 Manifest V3 插件，可独立下载，也可连接 Windows 桌面版 SnowDown v0.2.10。
+
+v0.1.7 将原 PNG 在页面下载入口绘制为 Canvas，避免网页请求扩展图片地址被拒绝；原 Logo 像素不变。插件重载、上下文失效后停止旧脚本并清理控件。更新文件后必须刷新扩展，再刷新已打开网页；错误页保留的历史记录需单独清除。桌面 v0.2.10 原发布包仍内置 v0.1.6，使用本次独立插件 ZIP 更新。
 
 v0.1.6 将预览按钮直接挂载在对应封面中，随网页滚动、容器裁切和 CSS 变换原生移动，不使用全局浮层跟随坐标。同一视频的不同卡片分别绑定按钮。菜单在浏览器顶层展开，页面滚动时收起回封面。保留原 Logo、30px 小图标和半透明外框。桌面 v0.2.10 内置同版本号的新修订，新增版本检测；以 v0.2.10 Release 的插件 ZIP 为准。独立悬浮球已移除，仅保留封面／播放器下载入口。B站入口位于左上角，抖音播放器入口位于右侧操作栏上方。
 
@@ -12,7 +14,7 @@ v0.1.3 同步支持精选列表响应和已播放页面的 React 播放器数据
 
 推荐从桌面软件左侧“浏览器插件”贴片选择浏览器。软件会准备稳定的插件目录、注册当前用户的原生消息通道、打开扩展管理页与文件夹。开启开发者模式，选择“加载已解压的扩展”，选择软件显示的目录即可。首次连接默认启用桌面转发和账号同步，可在插件设置中关闭。
 
-独立使用：下载 `SnowDown_BrowserExtension_0.1.6.zip` 并完整解压。在 `chrome://extensions` 或 `edge://extensions` 开启开发者模式，加载包含 `manifest.json` 的文件夹。固定工具栏 SnowDown 图标。更新已有插件时覆盖原文件夹并刷新扩展，再刷新已有网页。
+独立使用：下载 `SnowDown_BrowserExtension_0.1.7.zip` 并完整解压。在 `chrome://extensions` 或 `edge://extensions` 开启开发者模式，加载包含 `manifest.json` 的文件夹。固定工具栏 SnowDown 图标。更新已有插件时覆盖原文件夹并刷新扩展，再刷新已有网页。
 
 普通 Windows 用户不能由软件静默安装未上架的扩展。当前未上架扩展商店，最后的浏览器加载确认需用户完成；不设置企业强制安装策略，不修改用户浏览器的 Preferences 或 Secure Preferences。官方说明：[Chrome](https://developer.chrome.com/docs/extensions/how-to/distribute/install-extensions)、[Edge](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-manage-extensions-webstore)。
 
