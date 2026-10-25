@@ -23,8 +23,9 @@ const MAX: usize = 512 * 1024;
 static BINDING_WRITE: Mutex<()> = Mutex::new(());
 #[derive(Default)]
 pub struct Bridge {
-    clients: Mutex<HashMap<String, Instant>>,
+    clients: Mutex<HashMap<String, Client>>,
 }
+struct Client { seen: Instant, version: Option<String>, revision: Option<String> }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserStatus {
@@ -32,6 +33,26 @@ pub struct BrowserStatus {
     name: String,
     installed: bool,
     connected: bool,
+    extension_version: Option<String>,
+    bundled_version: String,
+    update_available: bool,
+    refresh_required: bool,
+}
+fn extension_status(version: Option<&str>, revision: Option<&str>, bundled: &str) -> (bool,bool) {
+    let outdated=version.and_then(|v|semver::Version::parse(v).ok()).zip(semver::Version::parse(bundled).ok()).is_some_and(|(installed,current)|installed<current);
+    (outdated,version.is_none() || version==Some(bundled)&&revision!=Some("desktop-0.2.10"))
+}
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+    #[test]
+    fn installed_extension_is_distinct_from_bundled_files() {
+        assert_eq!(extension_status(Some("0.1.5"),None,"0.1.6"),(true,false));
+        assert_eq!(extension_status(None,None,"0.1.6"),(false,true));
+        assert_eq!(extension_status(Some("0.1.6"),None,"0.1.6"),(false,true));
+        assert_eq!(extension_status(Some("0.1.6"),Some("desktop-0.2.10"),"0.1.6"),(false,false));
+        assert_eq!(extension_status(Some("0.1.7"),None,"0.1.6"),(false,false));
+    }
 }
 #[derive(Serialize, Deserialize)]
 struct Endpoint {
@@ -158,16 +179,15 @@ pub fn cleanup_hosts() {
 }
 pub fn snapshot(state: &AppState) -> Vec<BrowserStatus> {
     let clients = state.browser.clients.lock().unwrap();
+    let bundled=serde_json::from_str::<Value>(include_str!("../resources/browser-extension/manifest.json")).ok().and_then(|v|v["version"].as_str().map(str::to_owned)).unwrap_or_default();
     [("chrome", "Google Chrome"), ("edge", "Microsoft Edge")]
         .into_iter()
-        .map(|(id, name)| BrowserStatus {
+        .map(|(id, name)| {let client=clients.get(id).filter(|c|c.seen.elapsed()<Duration::from_secs(16));let version=client.and_then(|c|c.version.clone());let (update,refresh)=extension_status(version.as_deref(),client.and_then(|c|c.revision.as_deref()),&bundled);BrowserStatus {
             id: id.into(),
             name: name.into(),
             installed: browser(id).is_some(),
-            connected: clients
-                .get(id)
-                .is_some_and(|t| t.elapsed() < Duration::from_secs(16)),
-        })
+            connected: client.is_some(),extension_version:version,bundled_version:bundled.clone(),update_available:client.is_some()&&update,refresh_required:client.is_some()&&refresh,
+        }})
         .collect()
 }
 pub fn install(app: &AppHandle, id: &str) -> Result<String, String> {
@@ -396,7 +416,7 @@ async fn dispatch(app: &AppHandle, state: &AppState, request: &Value) -> Result<
             .clients
             .lock()
             .unwrap()
-            .insert(browser.into(), Instant::now());
+            .insert(browser.into(), Client {seen:Instant::now(),version:request["extensionVersion"].as_str().filter(|v|v.len()<32&&semver::Version::parse(v).is_ok()).map(str::to_owned),revision:request["extensionRevision"].as_str().filter(|v|v.len()<64).map(str::to_owned)});
         let binding: HashMap<String, String> = std::fs::read(root().join("bindings.json"))
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())

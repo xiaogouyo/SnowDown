@@ -2,16 +2,16 @@
 
 Windows 桌面视频下载工具，支持B站、抖音、小红书，并接入更多站点的通用解析与浏览器媒体读取。采用 Tauri 2、Vue 3、TypeScript 与 Rust，下载文件在本机处理和保存。
 
-## 下载 v0.2.9
+## 下载 v0.2.10
 
-**插件独立修复 v0.1.6：**[下载插件 ZIP](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.6/SnowDown_BrowserExtension_0.1.6.zip)。按钮改为直接附着在封面内，修复滚动、变换及重复卡片造成的漂移。桌面 v0.2.9 的原安装包内置 v0.1.5，使用此 ZIP 单独更新插件，然后刷新扩展与网页。[插件修复说明](docs/releases/extension-v0.1.6.md)
 
-内置插件 v0.1.5，原 Logo 保持不变。修复抖音主页、搜索与精选的预览识别；按钮缩小并增加半透明外框，滚动时即时锚定封面，减少重复整页扫描。桌面和插件共用 50 类站点目录。新增平台的实际可用范围和验证结果见[平台说明](docs/platform-support.md)。覆盖安装保留登录、设置、任务与下载内容。
 
-- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.9/SnowDown_0.2.9_x64-setup.exe)
-- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.9/SnowDown_0.2.9_Windows_x64_portable.zip)
-- [浏览器插件 v0.1.6](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.6/SnowDown_BrowserExtension_0.1.6.zip)
-- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.9)
+内置插件 v0.1.6 本次修订，原 Logo 保持不变。新增实际插件版本检测，移除独立悬浮球，B站入口放在封面左上角，抖音播放器入口移至右侧操作栏上方，图标内外居中。桌面和插件共用 50 类站点目录。新增平台的实际可用范围和验证结果见[平台说明](docs/platform-support.md)。覆盖安装保留登录、设置、任务与下载内容。
+
+- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.10/SnowDown_0.2.10_x64-setup.exe)
+- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.10/SnowDown_0.2.10_Windows_x64_portable.zip)
+- [浏览器插件 v0.1.6](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.10/SnowDown_BrowserExtension_0.1.6.zip)
+- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.10)
 
 需要 Windows 10/11 x64 和 WebView2 运行时。免安装版请完整解压后启动，保留 `resources` 文件夹。下载文件的 SHA256 校验值随 Release 提供。
 

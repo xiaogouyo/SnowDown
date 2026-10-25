@@ -18,7 +18,7 @@ async function call(method,data={}){
 let heartbeatPending,lastHeartbeat=0;
 async function heartbeat(force=false){if(heartbeatPending)return heartbeatPending;if(!force&&Date.now()-lastHeartbeat<1000)return {connected,version,binding,effectiveDesktop:connected&&(await prefs()).preferDesktop};
  heartbeatPending=checkHeartbeat().finally(()=>{heartbeatPending=null;lastHeartbeat=Date.now()});return heartbeatPending;}
-async function checkHeartbeat(){const result=await call('hello');const before=connected;connected=!!result.connected;version=result.data?.version||'';binding=result.data?.binding||'';
+async function checkHeartbeat(){const result=await call('hello',{extensionVersion:chrome.runtime.getManifest().version,extensionRevision:'desktop-0.2.10'});const before=connected;connected=!!result.connected;version=result.data?.version||'';binding=result.data?.binding||'';
  const settings=await prefs();if(connected&&binding&&settings.lastBinding!==binding){await chrome.storage.local.set({lastBinding:binding,preferDesktop:true,syncAccounts:true});}
  if(connected&&!before){lastSession='';void syncSessions();}
  await chrome.action.setBadgeText({text:connected?'✓':''});await chrome.action.setBadgeBackgroundColor({color:'#3478ee'});
@@ -130,8 +130,8 @@ async function floatingRequest(message,sender){
 async function registerResourceFloat(){
  const id='snowdown-floating-resources';const allowed=await chrome.permissions.contains({origins:['http://*/*','https://*/*']});
  const registered=(await chrome.scripting.getRegisteredContentScripts()).find(x=>x.id===id);
- if(allowed&&!registered)await chrome.scripting.registerContentScripts([{id,matches:['http://*/*','https://*/*'],excludeMatches:['https://*.bilibili.com/*','https://*.douyin.com/*','https://*.xiaohongshu.com/*'],js:['floating.js','preview.js'],runAt:'document_idle',allFrames:false}]);
- if(allowed&&registered&&!registered.js?.includes('preview.js'))await chrome.scripting.updateContentScripts([{id,js:['floating.js','preview.js']}]);
+ if(allowed&&!registered)await chrome.scripting.registerContentScripts([{id,matches:['http://*/*','https://*/*'],excludeMatches:['https://*.bilibili.com/*','https://*.douyin.com/*','https://*.xiaohongshu.com/*'],js:['preview.js'],runAt:'document_idle',allFrames:false}]);
+ if(allowed&&registered&&(registered.js?.length!==1||registered.js[0]!=='preview.js'))await chrome.scripting.updateContentScripts([{id,js:['preview.js']}]);
  if(!allowed&&registered)await chrome.scripting.unregisterContentScripts({ids:[id]});
 }
 chrome.permissions.onAdded.addListener(()=>void registerResourceFloat().catch(()=>{}));chrome.permissions.onRemoved.addListener(()=>void registerResourceFloat().catch(()=>{}));void registerResourceFloat().catch(()=>{});

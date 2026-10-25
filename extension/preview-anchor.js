@@ -26,15 +26,21 @@ function release(mount){
  mounts.delete(mount);
 }
 export function bindCardAnchor(host,target){
- const mount=cardMount(target);if(!mount)return null;acquire(mount);mount.append(host);
+ const bili=/(^|\.)bilibili\.com$/.test(location.hostname),douyin=/(^|\.)douyin\.com$/.test(location.hostname)&&target.tagName==='VIDEO';
+ let mount=cardMount(target),rail=null;
+ if(douyin){const player=target.closest('[data-e2e="feed-active-video"],[data-e2e="video-player"],.xgplayer')||mount;rail=player?.querySelector('[data-e2e="video-action"],[data-e2e="feed-video-action"],[data-e2e="video-player-right"]');mount=rail||player;}
+ if(!mount)return null;acquire(mount);mount.append(host);
  let released=false;
  function update(){
-  if(released||!target.isConnected||!mount.contains(target))return false;
+  if(released||!target.isConnected||!mount.isConnected)return false;
   const frame=mount.getBoundingClientRect(),box=target.getBoundingClientRect();
   const sx=frame.width/(mount.offsetWidth||frame.width||1),sy=frame.height/(mount.offsetHeight||frame.height||1);
   const cropped=/(hidden|clip)/.test(getComputedStyle(mount).overflowX+' '+getComputedStyle(mount).overflowY);
   const corner=target===mount||(Math.abs(box.left-frame.left)<2&&Math.abs(box.right-frame.right)<2&&Math.abs(box.top-frame.top)<2)||cropped&&box.left<=frame.left+2&&box.right>=frame.right-2&&box.top<=frame.top+2;
   host.style.position='absolute';host.style.margin='0';host.style.bottom='auto';host.style.visibility='visible';
+  if(douyin){host.dataset.placement='douyin-actions';host.style.left=rail?'50%':'auto';host.style.right=rail?'auto':'24px';host.style.top=rail?'-42px':'35%';host.style.transform=rail?'translateX(-50%)':'none';return true;}
+  host.dataset.placement=bili?'top-left':'top-right';host.style.transform='none';
+  if(bili){host.style.right='auto';host.style.left=corner?'6px':`${(box.left-frame.left)/sx+mount.scrollLeft-mount.clientLeft+6}px`;host.style.top=corner?'6px':`${(box.top-frame.top)/sy+mount.scrollTop-mount.clientTop+6}px`;return true;}
   if(corner){host.style.left='auto';host.style.right='6px';host.style.top='6px';}
   else{host.style.right='auto';host.style.left=`${(box.right-frame.left)/sx+mount.scrollLeft-mount.clientLeft-36}px`;host.style.top=`${(box.top-frame.top)/sy+mount.scrollTop-mount.clientTop+6}px`;}
   return true;

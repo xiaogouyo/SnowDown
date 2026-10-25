@@ -101,11 +101,12 @@ export async function deferUpdate(): Promise<UpdateStatus> { requireDesktop(); r
 export async function cancelUpdateDownload(): Promise<void> { requireDesktop(); await invoke('cancel_update_download') }
 export async function installUpdate(): Promise<void> { requireDesktop(); await invoke('install_update') }
 export async function dismissUpdateNotice(): Promise<void> { requireDesktop(); await invoke('dismiss_update_notice') }
-export async function browserStatus(): Promise<{id:string;name:string;installed:boolean;connected:boolean}[]> { requireDesktop(); return invoke('browser_status') }
+export interface BrowserStatus {id:string;name:string;installed:boolean;connected:boolean;extensionVersion?:string;bundledVersion?:string;updateAvailable?:boolean;refreshRequired?:boolean}
+export async function browserStatus(): Promise<BrowserStatus[]> { requireDesktop(); return invoke('browser_status') }
 export async function installBrowserExtension(browser:string): Promise<string> { requireDesktop(); return invoke('install_browser_extension',{browser}) }
 export async function saveBrowserExtensionZip(): Promise<string | null> {
   requireDesktop()
-  const path = await save({ title: '保存插件 ZIP', defaultPath: 'SnowDown_BrowserExtension_0.1.1.zip', filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }] })
+  const path = await save({ title: '保存插件 ZIP', defaultPath: 'SnowDown_BrowserExtension_0.1.6.zip', filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }] })
   return path ? invoke('export_browser_extension_zip', { path }) : null
 }
 export async function openUpdateRelease(): Promise<void> { requireDesktop(); await invoke('open_update_release') }

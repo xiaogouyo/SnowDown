@@ -4,7 +4,7 @@ import { ArrowDownToLine, ArrowUpRight, Check, ChevronRight, CircleCheck, FileAr
 import * as api from '../api'
 import { errorMessage } from '../format'
 const emit = defineEmits<{ visibility: [visible: boolean] }>()
-const browsers = ref<{ id: string; name: string; installed: boolean; connected: boolean }[]>([])
+const browsers = ref<api.BrowserStatus[]>([])
 const visible = ref(false), busy = ref(false), exporting = ref(false), error = ref(''), savedZip = ref('')
 const steps = [
   { icon: FileArchive, hint: '下载插件 ZIP 到本机' },
@@ -40,10 +40,11 @@ onUnmounted(() => { disposed = true; clearInterval(timer) })
       <section class="modal extension-modal" role="dialog" aria-modal="true" aria-labelledby="extension-title">
         <div class="modal-header"><div><span class="eyebrow">SNOWDOWN FOR YOUR BROWSER</span><h2 id="extension-title">连接你的浏览器</h2></div><button class="icon-button" aria-label="关闭插件设置" @click="close"><X :size="19" /></button></div>
         <div class="extension-body">
-          <p class="extension-intro">视频、图像一处收藏。插件 v0.1.1 可独立使用，也可将下载交给桌面端。</p>
+          <p class="extension-intro">视频、图像一处收藏。内置插件 v{{ browsers[0]?.bundledVersion || '0.1.6' }}，可独立使用或连接桌面端。</p>
+          <button class="text-button" :disabled="busy" @click="refresh">检查插件版本</button>
           <div v-for="browser in browsers" :key="browser.id" class="browser-choice">
-            <div><strong>{{ browser.name }}</strong><small><Check v-if="browser.connected" :size="12" />{{ browser.connected ? '已连接 SnowDown' : browser.installed ? '已检测到浏览器' : '未安装' }}</small></div>
-            <button class="button" :class="browser.connected ? 'secondary' : 'primary'" :disabled="busy" @click="install(browser.id)">{{ browser.installed ? browser.connected ? '管理插件' : '安装插件' : '下载浏览器' }}</button>
+            <div><strong>{{ browser.name }}</strong><small><Check v-if="browser.connected" :size="12" />{{ browser.connected ? browser.extensionVersion ? `已连接 · 插件 v${browser.extensionVersion}` : '已连接 · 旧插件未报告版本' : browser.installed ? '已检测到浏览器 · 尚未连接插件' : '未安装' }}</small><small v-if="browser.updateAvailable || browser.refreshRequired">{{ browser.updateAvailable ? `可更新至 v${browser.bundledVersion}` : '请更新插件文件并在浏览器刷新扩展与网页' }}</small></div>
+            <button class="button" :class="browser.connected ? 'secondary' : 'primary'" :disabled="busy" @click="install(browser.id)">{{ browser.installed ? browser.updateAvailable || browser.refreshRequired ? '更新插件' : browser.connected ? '管理插件' : '安装插件' : '下载浏览器' }}</button>
           </div>
           <section class="extension-package" aria-label="插件 ZIP 本地安装">
             <span class="package-icon"><FileArchive :size="25" /></span>

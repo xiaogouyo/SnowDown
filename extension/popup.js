@@ -26,7 +26,7 @@ $('sync').onchange=async()=>{try{await send('settings',{preferDesktop:status.set
 action('syncNow',async()=>{if(!status.connected)throw Error('请先启动 SnowDown 桌面端。');await send('sync');await refreshStatus();message('账号同步完成；仅同步浏览器已登录的平台。')});
 action('getDesktop',()=>send('desktop-download'));
 action('enableSites',async()=>{const allowed=await chrome.permissions.request({origins:['http://*/*','https://*/*']});message(allowed?`已启用 ${sites.length} 类站点的预览识别与网页资源读取。请刷新已有页面。`:'未授予更多站点权限，原有三平台仍可使用。')});
-$('floating').onchange=async()=>{try{await send('settings',{floatingEnabled:$('floating').checked});message($('floating').checked?'视频悬浮提醒已开启。':'视频悬浮提醒已关闭。')}catch(e){message(e.message)}};
+$('floating').onchange=async()=>{try{await send('settings',{floatingEnabled:$('floating').checked});message($('floating').checked?'视频下载入口已开启。':'视频下载入口已关闭。')}catch(e){message(e.message)}};
 action('openTab',()=>chrome.tabs.create({url:chrome.runtime.getURL(`popup.html?tab=${tab?.id||''}`)}));
 try{
  const current=await chrome.tabs.getCurrent();document.documentElement.classList.toggle('page-layout',!!current?.id);$('openTab').hidden=!!current?.id;

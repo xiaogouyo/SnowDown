@@ -16,6 +16,14 @@ beforeEach(async()=>{
 })
 afterEach(()=>{wrapper.unmount();document.body.innerHTML=''})
 describe('browser extension local installation',()=>{
+  it('reports running and bundled versions and offers updates for old clients',async()=>{
+    api.browserStatus.mockResolvedValue([{id:'edge',name:'Microsoft Edge',installed:true,connected:true,extensionVersion:'0.1.5',bundledVersion:'0.1.6',updateAvailable:true,refreshRequired:false}]);
+    wrapper.unmount();wrapper=mount(BrowserExtension,{attachTo:document.body});await wrapper.get('.extension-tile').trigger('click');await flushPromises();
+    expect(modal().textContent).toContain('插件 v0.1.5');expect(modal().textContent).toContain('可更新至 v0.1.6');expect(modal().querySelector('.browser-choice button')?.textContent).toBe('更新插件');
+  })
+  it('does not claim an unreported legacy version is current',async()=>{
+    api.browserStatus.mockResolvedValue([{id:'edge',name:'Microsoft Edge',installed:true,connected:true,bundledVersion:'0.1.6',refreshRequired:true}]);wrapper.unmount();wrapper=mount(BrowserExtension,{attachTo:document.body});await wrapper.get('.extension-tile').trigger('click');await flushPromises();expect(modal().textContent).toContain('旧插件未报告版本');expect(modal().textContent).toContain('刷新扩展与网页');
+  })
   it('replaces long instructions with a ZIP fallback and five accessible icon steps',()=>{
     expect(modal().querySelectorAll('.browser-choice')).toHaveLength(2)
     expect(modal().querySelectorAll('.extension-flow li')).toHaveLength(5)
