@@ -491,7 +491,7 @@ async fn rate_limit_is_shared_by_all_connections() {
 #[ignore = "Controlled per-connection throttling benchmark; prints actual durations and verifies output hashes"]
 async fn controlled_parallel_speed_comparison() {
     let mut durations = vec![];
-    for connections in [1, 8] {
+    for connections in [1, 8, 16] {
         let server = Fixture::new(8 * 1024 * 1024, 0, 8).await;
         let target = path();
         let began = Instant::now();
@@ -515,9 +515,11 @@ async fn controlled_parallel_speed_comparison() {
             outcome.peak_connections,
             elapsed.as_millis()
         );
+        assert_eq!(outcome.peak_connections, connections);
         durations.push(elapsed.as_secs_f64());
         finish(&target).await;
     }
     eprintln!("measured_speedup={:.2}x", durations[0] / durations[1]);
     assert!(durations[1] < durations[0] * 0.75);
+    assert!(durations[2] < durations[0] * 0.75);
 }

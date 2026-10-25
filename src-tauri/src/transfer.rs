@@ -361,7 +361,7 @@ async fn validated_receipt(path: &Path, directory: &Path, block: Block, limit: u
     Receipt::default()
 }
 async fn checkpoint(
-    file: &mut fs::File,
+    file: &mut tokio::io::BufWriter<fs::File>,
     directory: &Path,
     block: Block,
     received: u64,
@@ -369,7 +369,7 @@ async fn checkpoint(
     complete: bool,
 ) -> Result<(), Failure> {
     file.flush().await?;
-    file.sync_all().await?;
+    file.get_ref().sync_data().await?;
     atomic_json(
         &receipt_path(directory, block.index),
         &Receipt {
@@ -413,7 +413,10 @@ async fn block(
     } else {
         Sha256::new()
     };
-    let mut file = fs::OpenOptions::new().write(true).open(job.path).await?;
+    let mut file = tokio::io::BufWriter::with_capacity(
+        256 * 1024,
+        fs::OpenOptions::new().write(true).open(job.path).await?,
+    );
     for attempt in 0..3 {
         if job.cancel.stopped() {
             checkpoint(&mut file, job.directory, block, received, &hash, false).await?;
@@ -480,7 +483,7 @@ async fn block(
                 received += chunk.len() as u64;
                 count.store(received, Ordering::Relaxed);
                 job.new_bytes.fetch_add(chunk.len() as u64, Ordering::Relaxed);
-                if received - saved >= 1024 * 1024 || last.elapsed() >= Duration::from_millis(500) {
+                if received - saved >= 8 * 1024 * 1024 || last.elapsed() >= Duration::from_secs(2) {
                     checkpoint(&mut file, job.directory, block, received, &hash, false).await?;
                     saved = received;
                     last = Instant::now();

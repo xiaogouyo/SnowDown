@@ -807,7 +807,9 @@ Section Install
   ${EndIf}
 
   ; Copy main executable
+  ClearErrors
   File "${MAINBINARYSRCPATH}"
+  IfErrors snow_copy_failed
 
   ; Copy resources
   {{#each resources_dirs}}
@@ -815,11 +817,13 @@ Section Install
   {{/each}}
   {{#each resources}}
     File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
+    IfErrors snow_copy_failed
   {{/each}}
 
   ; Copy external binaries
   {{#each binaries}}
     File /a "/oname={{this}}" "{{no-escape @key}}"
+    IfErrors snow_copy_failed
   {{/each}}
 
   ; Create file associations
@@ -841,6 +845,7 @@ Section Install
   Push "registering"
   Call SnowStage
   WriteUninstaller "$INSTDIR\uninstall.exe"
+  IfErrors snow_copy_failed
 
   ; Save $INSTDIR in registry for future installations
   WriteRegStr SHCTX "${MANUPRODUCTKEY}" "" $INSTDIR
@@ -902,6 +907,13 @@ Section Install
   ${If} $PassiveMode = 1
     SetAutoClose true
   ${EndIf}
+  Goto snow_copy_done
+  snow_copy_failed:
+    Push "failed"
+    Call SnowStage
+    SetErrorLevel 22
+    Abort
+  snow_copy_done:
 SectionEnd
 
 Function .onInstSuccess

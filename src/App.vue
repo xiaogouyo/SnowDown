@@ -549,7 +549,7 @@ onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); u
                   <button v-if="['paused', 'failed', 'cancelled'].includes(task.status)" class="icon-button" :title="task.status === 'paused' ? '继续下载' : '重新下载'" @click="action(task, 'resume')"><Play v-if="task.status === 'paused'" :size="17" /><RotateCcw v-else :size="17" /></button>
                   <button v-if="task.status === 'completed'" class="icon-button" title="显示已下载文件" @click="action(task, 'reveal')"><FolderOpen :size="18" /></button>
                   <button v-if="['queued', 'downloading', 'merging', 'paused'].includes(task.status)" class="icon-button" title="取消下载" @click="action(task, 'cancel')"><X :size="17" /></button>
-                  <button v-else class="icon-button delete-button" title="移除记录（保留本地文件）" @click="action(task, 'remove')"><Trash2 :size="16" /></button>
+                  <button class="icon-button delete-button" aria-label="删除下载任务（保留已下载文件）" title="删除任务（保留本地文件）" @click="action(task, 'remove')"><Trash2 :size="16" /></button>
                 </div>
               </article>
             </div>

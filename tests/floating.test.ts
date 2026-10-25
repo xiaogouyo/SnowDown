@@ -1,9 +1,29 @@
 import{describe,it,expect,vi,afterEach}from'vitest'
 // @ts-expect-error Extension JS is bundled separately.
-import{supportedVideoUrl,contentSender,currentTicket}from'../extension/floating-core.js'
+import{supportedVideoUrl,contentSender,currentTicket,fitFloatingRect,floatingOrigin,rememberFloatingRect}from'../extension/floating-core.js'
 // @ts-expect-error MAIN-world function is intentionally self-contained.
 import{capturePage}from'../extension/page.js'
 describe('floating video boundaries',()=>{
+ it('clamps dragged shapes to each edge and restores their normalized position',()=>{
+  const viewport={width:1200,height:800},size={width:54,height:54}
+  expect(fitFloatingRect({left:-100,top:-90},size,viewport)).toMatchObject({left:8,top:8})
+  expect(fitFloatingRect({left:1500,top:1200},size,viewport)).toMatchObject({left:1138,top:738})
+  const rect={left:220,top:150,width:54,height:54}
+  const saved=rememberFloatingRect(rect,viewport)
+  expect(floatingOrigin(saved,viewport)).toEqual(rect)
+ })
+ it('keeps expanded cards within the viewport at every sphere position and after resize',()=>{
+  for(const viewport of [{width:1440,height:1000},{width:480,height:400},{width:210,height:220}])for(const x of [0,.5,1])for(const y of [0,.5,1]){
+   const rect=floatingOrigin({x,y},viewport,true)
+   expect(rect.left).toBeGreaterThanOrEqual(8);expect(rect.top).toBeGreaterThanOrEqual(8)
+   expect(rect.left+rect.width).toBeLessThanOrEqual(viewport.width-8)
+   expect(rect.top+rect.height).toBeLessThanOrEqual(viewport.height-8)
+  }
+ })
+ it('rejects malformed saved positions and keeps the default corner when no position exists',()=>{
+  const viewport={width:1200,height:800},fallback=floatingOrigin(null,viewport)
+  for(const value of [{x:NaN,y:0},{x:2,y:1},{x:0,y:Infinity},{x:'1',y:0}])expect(floatingOrigin(value,viewport)).toEqual(fallback)
+ })
  it('only recognizes actual video routes on official platform domains',()=>{
   expect(supportedVideoUrl('https://www.bilibili.com/video/BV17x411w7KC')).toBe(true)
   expect(supportedVideoUrl('https://www.douyin.com/jingxuan?modal_id=7689371847216893193')).toBe(true)

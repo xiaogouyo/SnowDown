@@ -61,6 +61,7 @@ pub fn start_scheduler(app: AppHandle, state: Arc<AppState>) {
                     cancel
                 };
                 state.emit(&app);
+                state.notifications.show(&app, format!("start:{}", task.id), "开始下载", &task.title);
                 let job_state = state.clone();
                 let job_app = app.clone();
                 tauri::async_runtime::spawn(async move {
@@ -94,7 +95,15 @@ pub fn start_scheduler(app: AppHandle, state: Arc<AppState>) {
                             });
                         }
                     }
-                    job_state.active.lock().unwrap().remove(&id);
+                    // Serialize cleanup ownership with task removal; no locks cross await.
+                    let removed = {
+                        let tasks = job_state.tasks.lock().unwrap();
+                        job_state.active.lock().unwrap().remove(&id);
+                        !tasks.iter().any(|task| task.id == id)
+                    };
+                    if removed {
+                        crate::task_files::cleanup(task.download_dir.clone(), id.clone()).await;
+                    }
                     job_state.emit(&job_app);
                 });
             }

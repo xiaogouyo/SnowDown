@@ -24,6 +24,7 @@ namespace SnowDown.Setup
         {
             try
             {
+                InstallerCore.Log("Setup started; version=" + BuildInfo.Version);
                 if (args.Length == 1 && args[0] == "--verify-payload")
                 {
                     string temporary = NewTemporaryDirectory();
@@ -58,8 +59,8 @@ namespace SnowDown.Setup
             }
             catch (Exception error)
             {
-                // No command line or credentials are written to logs.
-                if (args.Length == 0 || Array.Exists(args, argument => argument.StartsWith("--update-dir=", StringComparison.Ordinal))) MessageBox.Show("安装器无法启动：" + error.Message, "SnowDown", MessageBoxButton.OK, MessageBoxImage.Information);
+                InstallerCore.Log("Failed: " + error.GetType().Name + ": " + error.Message);
+                if (args.Length == 0 || Array.Exists(args, argument => argument.StartsWith("--update-dir=", StringComparison.Ordinal))) MessageBox.Show("安装未完成：" + error.Message + "\n安装日志：" + InstallerCore.LogPath, "SnowDown", MessageBoxButton.OK, MessageBoxImage.Information);
                 return 1;
             }
         }
@@ -78,8 +79,11 @@ namespace SnowDown.Setup
                 using (Process backend = InstallerCore.StartBackend(payload, directory, Path.Combine(temporary, "stage"), updateDirectory != null))
                 {
                     backend.WaitForExit();
-                    if (backend.ExitCode != 0 && backend.ExitCode != 3010) return backend.ExitCode;
+                    string stage = Path.Combine(temporary, "stage");
+                    InstallerCore.Log("Backend exit=" + backend.ExitCode + "; stage=" + (File.Exists(stage) ? File.ReadAllText(stage).Trim() : "unknown"));
+                    if (backend.ExitCode != 0 && backend.ExitCode != 3010) throw new IOException("安装后端返回 " + backend.ExitCode + "，请关闭占用程序并检查安装权限后重试。");
                     InstallerCore.FinalizeInstalled(directory, previous);
+                    InstallerCore.Log("Installed files verified successfully.");
                     if (updateDirectory != null) Process.Start(new ProcessStartInfo(Path.Combine(directory,"snowdown.exe")) { UseShellExecute = true, WorkingDirectory = directory });
                     return backend.ExitCode;
                 }
@@ -219,17 +223,20 @@ namespace SnowDown.Setup
                     }
                 });
                 timer.Stop();
+                InstallerCore.Log("Backend exit=" + exitCode + "; stage=" + (File.Exists(statusFile) ? File.ReadAllText(statusFile).Trim() : "unknown"));
                 if (exitCode != 0 && exitCode != 3010)
                 {
                     string stage = File.Exists(statusFile) ? File.ReadAllText(statusFile).Trim() : "failed";
                     throw new IOException(stage == "running" ? InstallerCore.StageText(stage) : "安装未完成（" + exitCode + "），请检查磁盘空间和文件权限后重试。");
                 }
                 InstallerCore.FinalizeInstalled(installedDirectory,previous);
+                InstallerCore.Log("Installed files verified successfully.");
                 SetComplete();
                 if (exitCode == 3010) status.Text = "组件更新将在重新启动 Windows 后完成。";
             }
             catch (Exception error)
             {
+                InstallerCore.Log("Failed: " + error.GetType().Name + ": " + error.Message);
                 busy = false; complete = false;
                 readyPanel.Visibility = Visibility.Visible;
                 progressPanel.Visibility = Visibility.Collapsed;
@@ -237,7 +244,7 @@ namespace SnowDown.Setup
                 installPath.IsEnabled = true; launch.IsEnabled = true;
                 actionText.Text = "重试安装";
                 status.Foreground = new SolidColorBrush(Color.FromRgb(194, 102, 111));
-                status.Text = error.Message;
+                status.Text = error.Message + " 日志：" + InstallerCore.LogPath;
             }
             finally
             {

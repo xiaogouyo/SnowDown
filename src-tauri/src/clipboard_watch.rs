@@ -239,7 +239,10 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
                             seen = Some(sequence);
                             if let Some(source) = text.and_then(|text| sites::recognize(&text).ok())
                             {
+                                let key = format!("link:{}", source.url);
+                                let message = format!("已识别{}视频链接，打开 SnowDown 查看。", source.platform.label());
                                 if poll_state.clipboard.detect(source, sequence) {
+                                    poll_state.notifications.show(&poll_app, key, "发现视频链接", &message);
                                     emit(&poll_app, &poll_state);
                                 }
                             }

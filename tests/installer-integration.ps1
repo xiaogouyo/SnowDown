@@ -26,6 +26,23 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'QA NSIS compilation failed.' }
     $taskWrapper = Join-Path $taskQaRoot 'SnowDown-QA-setup.exe'
     & (Join-Path $taskRoot 'scripts\build-installer.ps1') -SkipTests -PayloadPath $taskPayload -OutputPath $taskWrapper
+    # Start with an actual archived pre-auto-update binary, an older registry
+    # version and no ownership manifest. Keep product/registry fully isolated.
+    $taskLegacyExe = Join-Path $taskRoot 'release\SnowDown-0.1.10-Windows-x64\SnowDown.exe'
+    if (-not (Test-Path -LiteralPath $taskLegacyExe)) { throw 'Archived v0.1.10 binary required for cross-version QA.' }
+    $taskMainDefinition = [regex]::Match($taskScript,'(?m)^!define MAINBINARYSRCPATH "([^\r\n]+)"')
+    $taskLegacyPayload = Join-Path $taskQaRoot 'legacy-payload.exe'
+    $taskLegacyScript = $taskScript.Replace($taskMainDefinition.Groups[1].Value,$taskLegacyExe).Replace($taskPayload,$taskLegacyPayload)
+    $taskLegacyScript = $taskLegacyScript.Replace("!define VERSION `"$taskVersion`"",'!define VERSION "0.1.10"').Replace("!define VERSIONWITHBUILD `"$taskVersion.0`"",'!define VERSIONWITHBUILD "0.1.10.0"')
+    $taskLegacyNsi = Join-Path $taskQaRoot 'legacy.nsi'
+    $taskLegacyScript | Set-Content -LiteralPath $taskLegacyNsi -Encoding utf8
+    & $taskCompiler /V2 "/X!addincludedir `"$taskGenerated`"" $taskLegacyNsi
+    if ($LASTEXITCODE -ne 0) { throw 'Legacy fixture compilation failed.' }
+    $taskLegacy = Start-Process -FilePath $taskLegacyPayload -ArgumentList "/S /NS /D=$taskInstall" -PassThru -Wait -WindowStyle Hidden
+    if ($taskLegacy.ExitCode -ne 0) { throw 'Legacy fixture installation failed.' }
+    $taskLegacyHash = (Get-FileHash -LiteralPath (Join-Path $taskInstall 'snowdown.exe')).Hash
+    if ($taskLegacyHash -ne (Get-FileHash -LiteralPath $taskLegacyExe).Hash) { throw 'Legacy binary was not installed.' }
+    foreach ($taskProtected in @('Cookies','settings.json','tasks.db','download.mp4')) { [IO.File]::WriteAllText((Join-Path $taskInstall $taskProtected),'legacy-'+$taskProtected) }
     $taskResult = Start-Process -FilePath $taskWrapper -ArgumentList @('/S',"`"/D=$taskInstall`"") -PassThru -Wait -WindowStyle Hidden
     if ($taskResult.ExitCode -ne 0) { throw "Shaped installer silent flow failed: $($taskResult.ExitCode)" }
     foreach ($taskPair in @(@('src-tauri\target\release\snowdown.exe','snowdown.exe'),@('src-tauri\resources\ffmpeg.exe','resources\ffmpeg.exe'))) {
@@ -36,6 +53,16 @@ try {
     $taskKey = $taskUserRegistry.OpenSubKey($taskRegistry)
     if (-not $taskKey -or $taskKey.GetValue('DisplayVersion') -ne $taskVersion) { throw 'QA add/remove programs entry missing.' }
     $taskKey.Dispose()
+    foreach ($taskProtected in @('Cookies','settings.json','tasks.db','download.mp4')) { if ([IO.File]::ReadAllText((Join-Path $taskInstall $taskProtected)) -ne 'legacy-'+$taskProtected) { throw 'Cross-version update changed user data.' } }
+    # A locked component must reject the upgrade before replacing the executable.
+    $taskBeforeLock = (Get-FileHash -LiteralPath (Join-Path $taskInstall 'snowdown.exe')).Hash
+    $taskLock = [IO.File]::Open((Join-Path $taskInstall 'resources\ffmpeg.exe'),[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
+    try {
+        $taskLocked = Start-Process -FilePath $taskWrapper -ArgumentList @('/S',"`"/D=$taskInstall`"") -PassThru -Wait -WindowStyle Hidden
+        if ($taskLocked.ExitCode -eq 0) { throw 'Locked resource was incorrectly accepted.' }
+        if ((Get-FileHash -LiteralPath (Join-Path $taskInstall 'snowdown.exe')).Hash -ne $taskBeforeLock) { throw 'Installer partially overwrote a locked installation.' }
+    } finally { $taskLock.Dispose() }
+    Write-Output 'Cross-version v0.1.10 -> current passed: old executable/registry/no manifest, protected data, locked component rejects before overwrite.'
     # A harmless console fixture holds the target executable. Neither frontend nor
     # NSIS backend may terminate it to complete an installation.
     $taskHolderSource = Join-Path $taskQaRoot 'Holder.cs'
@@ -109,6 +136,8 @@ try {
     [IO.File]::AppendAllText($taskPrevious,$taskOldHash+'|resources/obsolete.dll'+[char]10)
     foreach ($taskProtected in @('Cookies','settings.json','tasks.db','download.mp4')) { [IO.File]::WriteAllText((Join-Path $taskInstall $taskProtected),'preserve-'+$taskProtected) }
     $taskWaiting = Start-Process -FilePath $taskAutoExe -ArgumentList '--hold' -PassThru -WindowStyle Hidden
+    $taskOldKey = $taskUserRegistry.OpenSubKey($taskRegistry,$true)
+    $taskOldKey.SetValue('DisplayVersion','0.2.4'); $taskOldKey.Dispose()
     $taskAutoResult = Start-Process -FilePath $taskAutoWrapper -ArgumentList @('--auto-update',"`"--update-dir=$taskInstall`"","--wait-pid=$($taskWaiting.Id)") -PassThru -Wait -WindowStyle Hidden
     if ($taskAutoResult.ExitCode -ne 0) { throw "Auto overwrite failed: $($taskAutoResult.ExitCode)" }
     for ($taskWait=0; $taskWait -lt 30 -and -not (Test-Path -LiteralPath (Join-Path $taskInstall 'auto-launched.txt')); $taskWait++) { Start-Sleep -Milliseconds 100 }

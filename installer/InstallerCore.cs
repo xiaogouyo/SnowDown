@@ -13,6 +13,42 @@ namespace SnowDown.Setup
     internal static class InstallerCore
     {
         internal const string ManifestName = ".snowdown-program-files.v1";
+        internal static string LogPath;
+        internal static void Log(string message)
+        {
+            try
+            {
+                if (LogPath == null)
+                {
+                    string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SnowDown", "Logs");
+                    Directory.CreateDirectory(folder);
+                    LogPath = Path.Combine(folder, "setup-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + "-" + Process.GetCurrentProcess().Id + ".log");
+                }
+                File.AppendAllText(LogPath, DateTime.Now.ToString("O") + " " + message + Environment.NewLine, Encoding.UTF8);
+            }
+            catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+
+        internal static void CheckOverwrite(string directory)
+        {
+            // Check every file the payload will replace BEFORE copying any bytes.
+            // This also catches lingering media/browser processes and read-only files.
+            string manifest;
+            using (Stream source = Assembly.GetExecutingAssembly().GetManifestResourceStream("SnowDown.Manifest"))
+            using (StreamReader reader = new StreamReader(source)) manifest = reader.ReadToEnd();
+            foreach (string relative in ParseManifest(manifest).Keys.Concat(new[] { "uninstall.exe" }))
+            {
+                string path = OwnedPath(directory, relative);
+                if (path == null) throw new IOException("安装目录含有链接或无效的程序路径，请选择其他独立文件夹。");
+                if (!File.Exists(path)) continue;
+                for (int attempt = 0; ; attempt++)
+                {
+                    try { using (FileStream file = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { } break; }
+                    catch (IOException) { if (attempt >= 20) { Log("File busy: " + relative); throw new IOException("程序文件仍被占用：" + relative + "。请退出 SnowDown 和浏览器后重试。"); } System.Threading.Thread.Sleep(250); }
+                    catch (UnauthorizedAccessException) { Log("File access denied: " + relative); throw new IOException("无法覆盖程序文件：" + relative + "。请检查安装目录权限或只读属性。"); }
+                }
+            }
+        }
         internal static bool AutomaticUpdate(string[] args)
         {
             bool automatic = Array.Exists(args, argument => argument == "--auto-update");
@@ -206,7 +242,12 @@ namespace SnowDown.Setup
 
         internal static Process StartBackend(string payload, string directory, string statusFile, bool update = false)
         {
-            ProcessStartInfo start = new ProcessStartInfo(payload, BackendArguments(directory,update));
+            CheckOverwrite(directory);
+            // Existing installations always use NSIS's in-place upgrade branch,
+            // including manual/silent installers and versions predating the manifest.
+            bool overwrite = update || File.Exists(Path.Combine(directory, "snowdown.exe")) || File.Exists(Path.Combine(directory, "uninstall.exe"));
+            Log("Starting backend; in-place=" + overwrite + "; target=" + NormalizePath(directory));
+            ProcessStartInfo start = new ProcessStartInfo(payload, BackendArguments(directory,overwrite));
             start.UseShellExecute = false;
             start.CreateNoWindow = true;
             start.WorkingDirectory = Path.GetDirectoryName(payload);

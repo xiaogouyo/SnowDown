@@ -26,6 +26,8 @@ mod resource_download;
 mod site_sessions;
 mod sites;
 mod storage;
+mod task_files;
+mod notifications;
 mod transfer;
 mod tray_menu;
 mod update_cleanup;
@@ -63,6 +65,7 @@ pub struct AppState {
     stopping: AtomicBool,
     update_notice: update_notice::Notice,
     browser: browser_bridge::Bridge,
+    notifications: notifications::Notifications,
 }
 
 impl AppState {
@@ -92,17 +95,25 @@ impl AppState {
         id: &str,
         update: F,
     ) -> Result<(), String> {
+        let mut completed = None;
         {
             let mut tasks = self.tasks.lock().unwrap();
             let task = tasks.iter_mut().find(|t| t.id == id).ok_or("任务不存在")?;
+            let previous = task.status.clone();
             update(task);
             if task.status != TaskStatus::Downloading {
                 task.active_connections = 0;
                 task.speed = 0;
             }
             self.storage.save_task(task)?;
+            if previous != TaskStatus::Completed && task.status == TaskStatus::Completed {
+                completed = Some(task.page_title.clone());
+            }
         }
         self.emit(app);
+        if let Some(title) = completed {
+            self.notifications.show(app, format!("complete:{id}"), "下载完成", &title);
+        }
         Ok(())
     }
 }
@@ -318,6 +329,7 @@ async fn inspect_video(
     state: State<'_, Arc<AppState>>,
 ) -> Result<VideoInfo, String> {
     let source = sites::recognize(&input)?;
+    state.notifications.show(&app, format!("link:{}", source.url), "发现视频链接", &format!("已识别{}视频链接，正在解析。", source.platform.label()));
     if state.clipboard.manual(clipboard::sequence()) {
         clipboard_watch::emit(&app, &state);
     }
@@ -424,16 +436,23 @@ fn task_action(
     }
     if action == "remove" {
         let mut tasks = state.tasks.lock().unwrap();
-        let task = tasks.iter().find(|t| t.id == id).ok_or("任务不存在")?;
-        if matches!(
-            task.status,
-            TaskStatus::Downloading | TaskStatus::Merging | TaskStatus::Queued
-        ) || state.active.lock().unwrap().contains_key(&id)
-        {
-            return Err("请先暂停或取消任务，再移除记录。".into());
-        }
+        let task = tasks
+            .iter()
+            .find(|t| t.id == id)
+            .ok_or("任务不存在")?
+            .clone();
+        // tasks -> active matches the scheduler. Late patches cannot recreate a deleted task.
         state.storage.remove_task(&id)?;
+        let active = state.active.lock().unwrap();
+        let running = active.contains_key(&id);
+        if let Some(cancel) = active.get(&id) {
+            cancel.store(true, Ordering::Relaxed);
+        }
         tasks.retain(|t| t.id != id);
+        drop(active);
+        if !running {
+            tauri::async_runtime::spawn(task_files::cleanup(task.download_dir, task.id));
+        }
         drop(tasks);
         state.emit(&app);
         return Ok(());
@@ -631,6 +650,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let handle = app.handle().clone();
             let data_dir = handle.path().app_data_dir()?;
@@ -721,8 +741,10 @@ pub fn run() {
                 stopping: AtomicBool::new(false),
                 update_notice: update_notice::Notice::default(),
                 browser: browser_bridge::Bridge::default(),
+                notifications: notifications::Notifications::default(),
             });
             app.manage(state.clone());
+            notifications::prepare(&handle, &data_dir);
             tray_menu::create(&handle)?;
             update_notice::create(&handle)?;
             #[cfg(debug_assertions)]
