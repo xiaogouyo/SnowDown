@@ -1,3 +1,4 @@
+import {cacheKey,cacheSite,authCookieSite,retryStableParse} from './cache-context.js';
 import {capturePage} from './page.js';
 import {linkedPageMedia} from './linked-page.js';
 import {downloadRows} from './media.js';
@@ -17,7 +18,7 @@ let port,sequence=0,connected=false,version='',binding='',lastSession='',syncTim
 const pending=new Map(),network=new Map(),floatTickets=new Map();
 const prefs=async()=>({preferDesktop:false,syncAccounts:true,floatingEnabled:true,...await chrome.storage.local.get(['preferDesktop','syncAccounts','lastBinding','floatingEnabled'])});
 async function call(method,data={},deadline){
- if(!port){try{port=chrome.runtime.connectNative('app.snowdown.bridge');port.onMessage.addListener(value=>{const waiter=pending.get(value.id);if(waiter){pending.delete(value.id);clearTimeout(waiter.timer);waiter.resolve(value)}});port.onDisconnect.addListener(()=>{void chrome.runtime.lastError;port=null;if(connected)parseCache.clear();connected=false;for(const waiter of pending.values()){clearTimeout(waiter.timer);waiter.resolve({connected:false})}pending.clear()})}catch{return {connected:false}}}
+ if(!port){try{port=chrome.runtime.connectNative('app.snowdown.bridge');port.onMessage.addListener(value=>{const waiter=pending.get(value.id);if(waiter){pending.delete(value.id);clearTimeout(waiter.timer);waiter.resolve(value)}});port.onDisconnect.addListener(()=>{void chrome.runtime.lastError;port=null;if(connected)parseCache.dropWhere(value=>value.video?.streams?.some(stream=>stream.native));connected=false;for(const waiter of pending.values()){clearTimeout(waiter.timer);waiter.resolve({connected:false})}pending.clear()})}catch{return {connected:false}}}
  return new Promise(resolve=>{const id=++sequence;pending.set(id,{resolve,timer:setTimeout(()=>{pending.delete(id);resolve({connected:false,error:'解析超时，请在浏览器打开目标视频并播放后重试。'})},deadline||(method==='hello'?2500:method==='inspect'||method==='queue'?65000:45000))});try{port.postMessage({id,browser,method,...data})}catch{const item=pending.get(id);clearTimeout(item?.timer);pending.delete(id);resolve({connected:false})}});
 }
 let heartbeatPending,lastHeartbeat=0;
@@ -29,7 +30,7 @@ async function checkHeartbeat(){const result=await call('hello',{extensionVersio
  await chrome.action.setBadgeText({text:connected?'✓':''});await chrome.action.setBadgeBackgroundColor({color:'#3478ee'});
  return {connected,version,binding,effectiveDesktop:connected&&(await prefs()).preferDesktop};}
 async function pageFor(tabId,resources=false,targetUrl=null,accountOnly=false){const results=await captureQueue(()=>chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:capturePage,args:[{resources,backgrounds:resources,targetUrl,accountOnly}]}));const page=results[0]?.result;if(!page)throw Error('当前页面无法读取。');return {...page,platform:page.platform||platformOf(page.url),site:siteOf(page.url),resources:resources?normalizeResources([...page.resources,...(network.get(tabId)||[])]):[]}}
-async function resolvePage(tabId,targetUrl=null,preview=null){const tab=await chrome.tabs.get(tabId),key=`${tabId}:${tab.url}:${targetUrl||tab.url}`;return parseCache.resolve(key,()=>parseQueue(async()=>{const result=await resolvePageWork(tabId,targetUrl,preview);if((await chrome.tabs.get(tabId)).url!==tab.url)throw Error('页面已切换，请重新读取。');return result}));}
+async function resolvePage(tabId,targetUrl=null,preview=null){const tab=await chrome.tabs.get(tabId),key=cacheKey(tabId,tab.url,targetUrl);return retryStableParse(()=>parseCache.resolve(key,()=>parseQueue(async()=>{const result=await resolvePageWork(tabId,targetUrl,preview);if((await chrome.tabs.get(tabId)).url!==tab.url)throw Error('页面已切换，请重新读取。');return result})),async()=>(await chrome.tabs.get(tabId)).url===tab.url);}
 async function resolvePageWork(tabId,targetUrl=null,preview=null){
  let page=await pageFor(tabId,false,targetUrl);if(preview){page.title=preview.title||page.title;page.cover=preview.cover||page.cover;}
  if(page.platform!=='web'&&page.platform){try{return {page,video:await parseVideo(page)}}catch(original){const state=await heartbeat();if(state.connected){const result=await call('inspect',{url:page.url},18000);if(result.data?.streams?.length)return {page,video:result.data};}throw original;}}
@@ -55,7 +56,7 @@ async function syncSessions(){if(!connected||!(await prefs()).syncAccounts)retur
  const signature=JSON.stringify(sessions);if(signature===lastSession)return;
  const result=await call('sessions',{sessions});if(result.connected&&!result.error){lastSession=signature;await chrome.storage.local.set({syncedAt:Date.now(),syncedPlatforms:result.data?.filter(x=>x.saved).map(x=>x.platform)||[]})}
 }
-chrome.cookies.onChanged.addListener(change=>{if(siteOf('https://'+change.cookie.domain.replace(/^\./,''))&&/sess|token|auth|login|sid/i.test(change.cookie.name))parseCache.clear();if(!['bilibili.com','douyin.com','xiaohongshu.com'].some(domain=>change.cookie.domain.replace(/^\./,'').endsWith(domain)))return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>void syncSessions(),1500)});
+chrome.cookies.onChanged.addListener(change=>{const authSite=authCookieSite(change.cookie);if(authSite)parseCache.invalidateWhere(key=>cacheSite(key)===authSite,'auth');if(!['bilibili.com','douyin.com','xiaohongshu.com'].some(domain=>change.cookie.domain.replace(/^\./,'').endsWith(domain)))return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>void syncSessions(),1500)});
 chrome.tabs.onRemoved.addListener(id=>{parseCache.invalidate(`${id}:`);network.delete(id);for(const [key,value]of floatTickets)if(value.tabId===id)floatTickets.delete(key)});
 chrome.tabs.onUpdated.addListener((id,change)=>{if(change.status==='loading'||change.url){parseCache.invalidate(`${id}:`);network.delete(id);for(const [key,value]of floatTickets)if(value.tabId===id)floatTickets.delete(key)}});
 const tabUrls=new Map(),tabLookups=new Map();
@@ -101,7 +102,7 @@ chrome.runtime.onMessage.addListener((message,sender,sendResponse)=>{
    case 'status':{void heartbeat().catch(()=>{});const settings=await prefs();return {connected,version,binding,effectiveDesktop:connected&&settings.preferDesktop,settings,...await chrome.storage.local.get(['syncedAt','syncedPlatforms'])};}
    case 'page':return pageFor(message.tabId,true);
    case 'parse':if(message.fresh)parseCache.invalidate(`${message.tabId}:`);return resolvePage(message.tabId);
-   case 'settings':{parseCache.clear();const update={};for(const key of ['preferDesktop','syncAccounts','floatingEnabled'])if(typeof message[key]==='boolean')update[key]=message[key];await chrome.storage.local.set(update);lastSession='';void syncSessions();return heartbeat();}
+   case 'settings':{const update={};for(const key of ['preferDesktop','syncAccounts','floatingEnabled'])if(typeof message[key]==='boolean')update[key]=message[key];await chrome.storage.local.set(update);lastSession='';void syncSessions();return heartbeat();}
    case 'sync':lastSession='';await syncSessions();return {ok:connected};
    case 'download':return download(message);
    case 'desktop-download':await chrome.tabs.create({url:repository});return {};
@@ -112,7 +113,7 @@ chrome.runtime.onMessage.addListener((message,sender,sendResponse)=>{
 function canonicalDouyin(input){const url=new URL(input);const id=url.pathname.match(/^\/video\/(\d{8,24})(?:\/|$)/)?.[1]||url.searchParams.get('modal_id')||url.searchParams.get('aweme_id')||url.searchParams.get('vid');return /^\d{8,24}$/.test(id||'')?`https://www.douyin.com/video/${id}`:null;}
 async function douyinTargets(tabId){return (await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:douyinPreviewTargets}))[0]?.result||[];}
 async function floatingRequest(message,sender){
- if(message.type==='media-changed'){parseCache.invalidate(`${sender.tab.id}:`);for(const [key,value]of floatTickets)if(value.tabId===sender.tab.id)floatTickets.delete(key);return {ok:true}}
+ if(message.type==='media-changed'){parseCache.invalidate(`${sender.tab.id}:current:`);for(const [key,value]of floatTickets)if(value.tabId===sender.tab.id&&!value.preview)floatTickets.delete(key);return {ok:true}}
  if(message.type==='float-disable'){await chrome.storage.local.set({floatingEnabled:false});return {enabled:false}}
  const settings=await prefs();if(!settings.floatingEnabled)throw Error('悬浮球提醒已关闭，可在插件设置重新开启。');
  if(message.type==='float-state')return {enabled:true,platform:platformNames[platformOf(sender.url)]||null,supported:supportedVideoUrl(sender.url)};
@@ -157,6 +158,6 @@ async function registerResourceFloat(){
  if(allowed&&registered&&(registered.js?.length!==1||registered.js[0]!=='preview.js'))await chrome.scripting.updateContentScripts([{id,js:['preview.js']}]);
  if(!allowed&&registered)await chrome.scripting.unregisterContentScripts({ids:[id]});
 }
-chrome.permissions.onAdded.addListener(()=>void registerResourceFloat().catch(()=>{}));chrome.permissions.onRemoved.addListener(()=>{parseCache.clear();network.clear();floatTickets.clear();void registerResourceFloat().catch(()=>{})});void registerResourceFloat().catch(()=>{});
+chrome.permissions.onAdded.addListener(()=>void registerResourceFloat().catch(()=>{}));chrome.permissions.onRemoved.addListener(()=>{parseCache.clear('permission');network.clear();floatTickets.clear();void registerResourceFloat().catch(()=>{})});void registerResourceFloat().catch(()=>{});
 chrome.alarms.create('connection',{periodInMinutes:.5});chrome.alarms.onAlarm.addListener(()=>void heartbeat());
 setInterval(()=>{if(connected)void heartbeat().catch(()=>{})},8000);void refererRules();void heartbeat();

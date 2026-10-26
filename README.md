@@ -2,12 +2,14 @@
 
 Windows 桌面视频下载工具与 Chrome / Edge 插件，共用 50 类平台目录。支持原三平台专用解析、更多站点通用提取器和浏览器媒体读取；实际范围见[平台说明](docs/platform-support.md)。
 
-## 下载 v0.2.13 / 插件 v0.1.10
+## 下载 v0.2.13 / 插件 v0.1.11
 
 - [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.13/SnowDown_0.2.13_x64-setup.exe)
 - [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.13/SnowDown_0.2.13_Windows_x64_portable.zip)
-- [独立浏览器插件 v0.1.10](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.10/SnowDown_BrowserExtension_0.1.10.zip)
+- [独立浏览器插件 v0.1.11](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.11/SnowDown_BrowserExtension_0.1.11.zip)
 - [发布说明与校验记录](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.13)
+
+插件 v0.1.11 修复预加载、统计 Cookie 与原生连接引起的缓存误失效，失败可直接重新读取。桌面官方包保持 v0.2.13。
 
 插件新增短期解析缓存与双 Worker，重复请求合并、过期和页面变化自动失效；滚动时延后卡片发现，后台下载不抢当前网页焦点。安装或更新插件后请刷新扩展及已有网页。
 
