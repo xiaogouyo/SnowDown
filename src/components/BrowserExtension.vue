@@ -48,7 +48,7 @@ onUnmounted(() => { disposed = true; clearInterval(timer) })
       <section class="modal extension-modal" role="dialog" aria-modal="true" aria-labelledby="extension-title">
         <div class="modal-header"><div><span class="eyebrow">SNOWDOWN FOR YOUR BROWSER</span><h2 id="extension-title">连接你的浏览器</h2></div><button class="icon-button" aria-label="关闭插件设置" @click="close"><X :size="19" /></button></div>
         <div class="extension-body">
-          <p class="extension-intro">视频、图像一处收藏。内置插件 v{{ browsers[0]?.bundledVersion || '0.1.9' }}，可独立使用或连接桌面端。</p>
+          <p class="extension-intro">视频、图像一处收藏。内置插件 v{{ browsers[0]?.bundledVersion || '0.1.10' }}，可独立使用或连接桌面端。</p>
           <section class="plugin-updates" aria-label="插件更新检查">
             <div class="update-heading"><div><strong>插件更新</strong><small>从 GitHub 检查独立插件正式版</small></div><button class="button secondary" :disabled="checking || downloading" @click="checkUpdates">{{ checking ? '正在检查…' : '检查插件更新' }}</button></div>
             <div v-if="latest" class="update-result" role="status"><strong>最新插件 v{{ latest.version }}</strong><p>{{ updateHint }}</p><div class="update-actions"><button class="button primary" :disabled="downloading" @click="downloadLatest">{{ downloading ? '正在下载并校验…' : '下载新版插件 ZIP' }}</button><button class="text-button" @click="openRelease">发布页面 ↗</button></div><details v-if="latest.notes"><summary>更新说明</summary><p class="update-notes">{{ latest.notes }}</p></details><p v-if="updateSaved" class="update-saved">已下载并通过 SHA256 校验。请解压覆盖原插件目录，再刷新浏览器扩展与网页。</p></div>

@@ -1,22 +1,24 @@
 // Executes in the current tab's MAIN world. No form values or arbitrary cookies.
-export function capturePage({resources:includeResources=false,backgrounds=true,targetUrl=null}={}){
+export async function capturePage({resources:includeResources=false,backgrounds=true,targetUrl=null,accountOnly=false}={}){
+  let sliceStart=performance.now();const yieldMain=async()=>{if(performance.now()-sliceStart>5){await new Promise(resolve=>setTimeout(resolve,0));sliceStart=performance.now();}};
   const url=targetUrl||location.href,host=new URL(url).hostname;
   const matches=base=>host===base||host.endsWith(`.${base}`);
   const platform=matches('bilibili.com')?'bilibili':matches('douyin.com')?'douyin':matches('xiaohongshu.com')?'xiaohongshu':null;
+  if(accountOnly){const root=platform==='douyin'?document.querySelector('[data-e2e="user-avatar"],[data-e2e="user-info"],header a[href*="/user/"]'):platform==='xiaohongshu'?[...document.querySelectorAll('a[href*="/user/profile/"]')].find(n=>/^(我|我的|个人主页)$/.test(n.textContent.trim())):null;const image=root?.querySelector('img')||(root?.tagName==='IMG'?root:null);return {url,platform,resources:[],account:image?{name:(root?.title||image.alt||'').slice(0,80),avatar:image.currentSrc||image.src}:null};}
   const resources=[];
   if(includeResources)for(const node of document.querySelectorAll('img,video,audio,source')){
-    const src=node.currentSrc||node.src;if(!/^https?:/.test(src||''))continue;
+    if(resources.length%64===0)await yieldMain();const src=node.currentSrc||node.src;if(!/^https?:/.test(src||''))continue;
     resources.push({url:src,kind:node.tagName==='IMG'?'image':node.tagName==='AUDIO'?'audio':'video',width:node.naturalWidth||node.videoWidth||0,height:node.naturalHeight||node.videoHeight||0,name:node.alt||'',mime:node.type||''});
     if(resources.length>=1000)break;
   }
   if(includeResources)for(const entry of performance.getEntriesByType('resource').slice(-1000))resources.push({url:entry.name,...(entry.initiatorType==='img'?{kind:'image'}:{})});
   if(includeResources&&backgrounds)for(const node of [...document.querySelectorAll('*')].slice(0,5000)){
-    const value=getComputedStyle(node).backgroundImage;
+    await yieldMain();const value=getComputedStyle(node).backgroundImage;
     for(const match of value.matchAll(/url\(["']?(https?:[^"')]+)["']?\)/g))resources.push({url:match[1],kind:'image'});
   }
   let id=platform==='douyin'?(new URL(url).searchParams.get('modal_id')||url.match(/\/video\/(\d+)/)?.[1]):platform==='xiaohongshu'?url.match(/\/(?:explore|item)\/([a-f\d]{24})/)?.[1]:url.match(/BV[\w]{10}/)?.[0];
   const roots=[...(Array.isArray(window.__snowdownMediaDetails)?window.__snowdownMediaDetails.slice(-4).reverse():[]),window.__INITIAL_STATE__,window._ROUTER_DATA,window.__UNIVERSAL_DATA_FOR_REHYDRATION__];
-  for(const script of document.querySelectorAll('script#RENDER_DATA,script#__NEXT_DATA__')){const raw=script.textContent;if(!raw||raw.length>3*1024*1024)continue;try{roots.push(JSON.parse(raw))}catch{try{roots.push(JSON.parse(decodeURIComponent(raw)))}catch{}}}
+  for(const script of document.querySelectorAll('script#RENDER_DATA,script#__NEXT_DATA__')){const raw=script.textContent;if(!raw||raw.length>1024*1024)continue;try{roots.push(JSON.parse(raw))}catch{try{roots.push(JSON.parse(decodeURIComponent(raw)))}catch{}}}
   let detail=null,seen=new Set(),count=0;
   function address(value){
     if(!value)return null;
@@ -34,13 +36,13 @@ export function capturePage({resources:includeResources=false,backgrounds=true,t
     const audio=(Array.isArray(audioRates)?audioRates:[]).slice(0,16).map(rate=>{const meta=rate.audio_meta||rate.audioMeta||{},urls=meta.url_list||meta.urlList||{};return {audio_meta:{bitrate:Number(meta.bitrate)||0,url_list:{main_url:urls.main_url||urls.mainUrl,backup_url:urls.backup_url||urls.backupUrl}}}});
     return {aweme_detail:{aweme_id:id,desc:String(value.desc||'').slice(0,1000),author:{nickname:String(value.author?.nickname||'').slice(0,100)},video:{width:Number(video.width)||0,height:Number(video.height)||0,duration:Number(video.duration)||0,cover:address(video.cover),play_addr:direct,play_addr_h264:h264,play_addr_bytevc1:hevc,bit_rate:rates,bit_rate_audio:audio}}};
   }
-  function find(value,depth=0){if(!value||typeof value!=='object'||seen.has(value)||depth>18||++count>18000)return;seen.add(value);
+  async function find(value,depth=0){if(!value||typeof value!=='object'||seen.has(value)||depth>18||++count>18000)return;seen.add(value);if(count%128===0)await yieldMain();
     if(value===window||value instanceof Node)return;
     if(platform==='douyin'&&String(value.aweme_id||value.awemeId)===id&&value.video){try{detail=project(value)}catch{}}
     if(platform==='xiaohongshu'&&(value.noteId===id||value.id===id)&&value.video)detail={note:{noteDetailMap:{[id]:{note:value}}}};
-    if(!detail)for(const key of Object.keys(value).slice(0,300)){try{find(value[key],depth+1)}catch{}if(detail)break;}
+    if(!detail)for(const key of Object.keys(value).slice(0,300)){try{await find(value[key],depth+1)}catch{}if(detail)break;}
   }
-  if(platform==='douyin'||platform==='xiaohongshu')for(const root of roots){find(root);if(detail)break;}
+  if(platform==='douyin'||platform==='xiaohongshu')for(const root of roots){await find(root);if(detail)break;}
   // A tab may already be playing when the extension is installed/reloaded. Inspect
   // bounded React props adjacent to the player; return only the exact video's fields.
   if(platform==='douyin'&&!detail&&id){
@@ -50,8 +52,8 @@ export function capturePage({resources:includeResources=false,backgrounds=true,t
       for(let node=video,level=0;node&&level<12&&!detail;node=node.parentElement,level++){
         for(const key of Object.keys(node).filter(key=>/^__react(?:Props|Fiber)\$/.test(key))){
           let value;try{value=node[key]}catch{continue}
-          if(key.startsWith('__reactProps'))find(value);
-          else for(let fiber=value,n=0;fiber&&n<12&&!detail;fiber=fiber.return,n++){find(fiber.memoizedProps);if(!detail)find(fiber.pendingProps)}
+          if(key.startsWith('__reactProps'))await find(value);
+          else for(let fiber=value,n=0;fiber&&n<12&&!detail;fiber=fiber.return,n++){await find(fiber.memoizedProps);if(!detail)await find(fiber.pendingProps)}
           if(detail)break;
         }
       }

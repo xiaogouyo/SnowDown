@@ -1,27 +1,19 @@
 # SnowDown
 
-Windows 桌面视频下载工具，支持B站、抖音、小红书，并接入更多站点的通用解析与浏览器媒体读取。采用 Tauri 2、Vue 3、TypeScript 与 Rust，下载文件在本机处理和保存。
+Windows 桌面视频下载工具与 Chrome / Edge 插件，共用 50 类平台目录。支持原三平台专用解析、更多站点通用提取器和浏览器媒体读取；实际范围见[平台说明](docs/platform-support.md)。
 
-## 下载 v0.2.12
+## 下载 v0.2.13 / 插件 v0.1.10
 
-**插件 v0.1.9：**[下载统一左上角入口版](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.9/SnowDown_BrowserExtension_0.1.9.zip)。所有平台的封面与播放器下载图标统一左上角，菜单从左侧展开，桌面内置同版本。[说明](docs/releases/extension-v0.1.9.md)
+- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.13/SnowDown_0.2.13_x64-setup.exe)
+- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.13/SnowDown_0.2.13_Windows_x64_portable.zip)
+- [独立浏览器插件 v0.1.10](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.10/SnowDown_BrowserExtension_0.1.10.zip)
+- [发布说明与校验记录](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.13)
 
-**插件 v0.1.8：**[下载插件 ZIP](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.8/SnowDown_BrowserExtension_0.1.8.zip)。其他平台卡片保持右上角，修正抖音完整播放器侧栏对齐；增加 YouTube 观看页及已播放媒体读取、超时和受限资源提示。[修复说明与限制](docs/releases/extension-v0.1.8.md)
+插件新增短期解析缓存与双 Worker，重复请求合并、过期和页面变化自动失效；滚动时延后卡片发现，后台下载不抢当前网页焦点。安装或更新插件后请刷新扩展及已有网页。
 
-**插件错误修复 v0.1.7：**[下载独立插件 ZIP](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.7/SnowDown_BrowserExtension_0.1.7.zip)。修复网页 Logo 加载被拒绝和失效旧脚本继续运行，保持原 Logo 与入口布局。更新后刷新扩展，再刷新已有网页；错误列表中的旧记录需单独清除。[说明](docs/releases/extension-v0.1.7.md)
+首次安装默认勾选开机自启动，可取消；偏好设置可随时开关，升级保留原选择。登录、任务、设置和下载内容继续沿用。
 
-
-
-首次安装默认勾选“开机自启动”，可在安装时取消，或在偏好设置中随时调整；覆盖升级保留原选择。登录 Windows 后进入托盘后台运行。
-
-在“连接你的浏览器”面板检查 GitHub 最新插件正式版，比较已连接版本，查看更新说明并下载经过 SHA256 校验的 ZIP。内置插件 v0.1.9，所有平台入口统一左上角，原 Logo 保持不变。桌面和插件共用 50 类站点目录。新增平台的实际可用范围和验证结果见[平台说明](docs/platform-support.md)。覆盖安装保留登录、设置、任务与下载内容。
-
-- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.12/SnowDown_0.2.12_x64-setup.exe)
-- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.12/SnowDown_0.2.12_Windows_x64_portable.zip)
-- [浏览器插件 v0.1.9](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.9/SnowDown_BrowserExtension_0.1.9.zip)
-- [发布说明与全部附件](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.12)
-
-需要 Windows 10/11 x64 和 WebView2 运行时。免安装版请完整解压后启动，保留 `resources` 文件夹。下载文件的 SHA256 校验值随 Release 提供。
+需要 Windows 10/11 x64 和 WebView2；免安装版请完整解压并保留 resources 目录。附件提供 SHA256。
 
 ## 简约模式
 

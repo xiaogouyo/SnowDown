@@ -15,7 +15,7 @@ import BrowserExtension from './components/BrowserExtension.vue'
 import AutostartToggle from './components/AutostartToggle.vue'
 import { prepareModeMorph } from './modeMorph'
 import './modeMorph.css'
-import { identifySource, platformLabels, sourceSummary, sourceLabel } from './sources'
+import { identifySource, platformLabels, sourceSummary, sourceLabel, supportedSiteCount, supportedSiteNames } from './sources'
 import { bytes, duration, errorMessage, statusLabels } from './format'
 import type { AppSnapshot, BatchOptions, BatchResult, ClipboardCapture, ClipboardSnapshot, DownloadTask, OutputFormat, Settings, VideoInfo, LoginQr, Platform, SourceLink } from './types'
 
@@ -496,10 +496,10 @@ onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); u
         </section>
 
         <section class="link-card" aria-label="添加下载">
-          <div class="link-card-label"><div class="platform-list"><span v-for="platform in platformList" :key="platform" :class="['platform-chip', platform, { detected: detectedSource?.platform === platform }]">{{ platformLabels[platform] }}</span></div><span>从一个链接开始收藏</span><span class="local-badge"><ShieldCheck :size="12" />本地下载</span></div>
+          <div class="link-card-label"><div class="platform-list"><span v-for="platform in platformList" :key="platform" :class="['platform-chip', platform, { detected: detectedSource?.platform === platform }]">{{ platformLabels[platform] }}</span><span class="platform-chip" :title="supportedSiteNames">{{ supportedSiteCount }} 平台</span></div><span>从一个链接开始收藏</span><span class="local-badge"><ShieldCheck :size="12" />本地下载</span></div>
           <form class="link-form" @submit.prevent="analyze">
             <Link2 :size="19" class="link-icon" />
-            <input ref="linkInput" v-model="link" aria-label="视频链接" placeholder="粘贴B站、抖音、小红书链接，或完整分享内容…" :disabled="analyzing" spellcheck="false" @paste="onPaste" @input="inputEdited = true" />
+            <input ref="linkInput" v-model="link" aria-label="视频链接" placeholder="粘贴支持平台的视频链接，或完整分享内容…" :disabled="analyzing" spellcheck="false" @paste="onPaste" @input="inputEdited = true" />
             <button class="paste-button" type="button" title="读取剪贴板并解析 · Ctrl+Shift+V" :disabled="analyzing" @click="paste"><ClipboardPaste :size="15" /><span>粘贴并解析</span></button>
             <button class="button primary analyze-button" type="submit" :disabled="analyzing"><LoaderCircle v-if="analyzing" :size="16" class="spin" /><Download v-else :size="16" />{{ analyzing ? '正在解析' : '解析视频' }}</button>
           </form>
@@ -540,7 +540,7 @@ onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); u
                 <div class="task-cover"><img v-if="task.cover" :src="task.cover" alt="" loading="lazy" referrerpolicy="no-referrer" /><Film v-else :size="24" /><span>{{ task.resource ? '资源' : task.format === 'audio' ? '音频' : task.platform === 'bilibili' ? `P${task.page}` : '视频' }}</span></div>
                 <div class="task-info">
                   <div class="task-title-line"><h3 :title="task.title">{{ task.title }}</h3><span :class="['status-tag', task.status]">{{ statusLabels[task.status] }}</span></div>
-                  <div class="task-meta"><span :class="['task-platform', task.platform]">{{ task.resource ? '浏览器' : platformLabels[task.platform ?? 'bilibili'] }}</span><i></i><span v-if="task.resource">{{ task.resource.extension.toUpperCase() }}</span><span v-else-if="task.format === 'audio'"><Music2 :size="11" />M4A</span><span v-else>MP4 · {{ task.qualityLabel }}</span><i></i><span class="page-title" :title="task.pageTitle">{{ !task.resource && (task.platform === 'bilibili' || !task.platform) ? `P${task.page} · ` : '' }}{{ task.pageTitle }}</span></div>
+                  <div class="task-meta"><span :class="['task-platform', task.platform]">{{ task.resource ? '浏览器' : sourceLabel({platform:task.platform ?? 'bilibili',sourceUrl:task.sourceUrl}) }}</span><i></i><span v-if="task.resource">{{ task.resource.extension.toUpperCase() }}</span><span v-else-if="task.format === 'audio'"><Music2 :size="11" />M4A</span><span v-else>MP4 · {{ task.qualityLabel }}</span><i></i><span class="page-title" :title="task.pageTitle">{{ !task.resource && (task.platform === 'bilibili' || !task.platform) ? `P${task.page} · ` : '' }}{{ task.pageTitle }}</span></div>
                   <div v-if="['downloading', 'merging', 'paused', 'queued'].includes(task.status)" class="progress-track"><div :class="{ paused: task.status === 'paused' }" :style="{ width: `${Math.min(task.progress, 100)}%` }"></div></div>
                   <div class="task-detail"><span v-if="task.error" class="task-error" :title="task.error">{{ task.error }}</span><span v-else-if="task.warning" class="task-warning" :title="task.warning">{{ task.warning }}</span><span v-else-if="task.status === 'completed'">{{ bytes(task.totalBytes) }}<span class="detail-separator">·</span>已保存到下载目录</span><span v-else-if="task.status === 'queued' && task.startIntervalSecs">等待下载<span class="detail-separator">·</span>同批启动间隔 {{ task.startIntervalSecs }} 秒</span><span v-else>{{ bytes(task.downloadedBytes) }}<template v-if="task.totalBytes"> / {{ bytes(task.totalBytes) }}</template></span><span v-if="task.status === 'downloading'" class="task-speed">{{ bytes(task.speed) }}/s<template v-if="task.activeConnections"> · {{ task.activeConnections }} 连接</template><span class="detail-separator">·</span>{{ task.progress.toFixed(1) }}%</span><span v-else-if="task.status === 'merging'">正在生成完整文件…</span></div>
                   <small v-if="task.resumedBytes" class="transfer-resumed">已续传 {{ bytes(task.resumedBytes) }}</small>
@@ -639,6 +639,6 @@ onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); u
       </section>
     </div>
 
-    <div v-if="dialog === 'about' && !simpleMode" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.2.4' }}</span><div class="about-description">B站、抖音、小红书视频，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="openUpdateCenter">检查更新<RotateCcw :size="14" /></button></section></div>
+    <div v-if="dialog === 'about' && !simpleMode" class="modal-overlay" @mousedown.self="dialog = null"><section class="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><button class="icon-button about-close" aria-label="关闭关于" @click="dialog = null"><X :size="20" /></button><span class="brand-mark about-mark"><Snowflake :size="33" /></span><h2 id="about-title">SnowDown<span>.</span></h2><p>好内容，慢慢收藏。</p><span class="version-tag">Windows · v{{ snapshot?.version ?? '0.2.4' }}</span><div class="about-description">支持 {{ supportedSiteCount }} 类平台，本地收藏。<br />视频、音频、字幕与弹幕，一处收藏。</div><div class="about-tech"><ShieldCheck :size="14" />本机解析与下载<span>·</span>Rust + Tauri + Vue</div><button class="button secondary" @click="openUpdateCenter">检查更新<RotateCcw :size="14" /></button></section></div>
   </div>
 </template>

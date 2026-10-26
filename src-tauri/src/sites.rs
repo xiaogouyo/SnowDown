@@ -736,6 +736,17 @@ mod tests {
         }
     }
     #[test]
+    fn desktop_recognizes_every_shared_plugin_platform_and_alias() {
+        assert_eq!(catalog().len(), 50);
+        for site in catalog() {
+            for host in &site.hosts {
+                assert_eq!(catalog_site(host).map(|s| s.id.as_str()), Some(site.id.as_str()));
+                assert!(source_host(host).is_some(), "{}", host);
+                assert!(source_host(&format!("{host}.evil.test")).is_none());
+            }
+        }
+    }
+    #[test]
     fn parses_json_without_executing_scripts() {
         let v = extract_state(
             r#"window.__INITIAL_STATE__={"a":undefined,"b":"undefined } \" ","c":{"d":1}};evil()"#,

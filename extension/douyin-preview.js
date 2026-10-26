@@ -1,6 +1,7 @@
 // Runs in MAIN world. Project only nearby video identities and public card
 // metadata; never return React state, account data, cookies or media URLs.
-export function douyinPreviewTargets() {
+export async function douyinPreviewTargets() {
+  let sliceStart=performance.now();const yieldMain=async()=>{if(performance.now()-sliceStart>5){await new Promise(resolve=>setTimeout(resolve,0));sliceStart=performance.now();}};
   if (!/(^|\.)douyin\.com$/.test(location.hostname)) return [];
   const videoId = input => {
     try {
@@ -13,17 +14,17 @@ export function douyinPreviewTargets() {
   };
   const pageId = videoId(location.href), results = new Map();
   let visited = 0;
-  function nearbyIdentity(node) {
+  async function nearbyIdentity(node) {
     for (let parent = node, level = 0; parent && level < 10 && parent !== document.body && parent !== document.documentElement; parent = parent.parentElement, level++) {
       const ids = new Set(), seen = new WeakSet();
-      function find(value, depth = 0) {
+      async function find(value, depth = 0) {
         if (!value || typeof value !== 'object' || value instanceof Node || value === window || seen.has(value) || depth > 12 || ++visited > 18000) return;
-        seen.add(value);
+        seen.add(value);if(visited%128===0)await yieldMain();
         const id = String(value.aweme_id || value.awemeId || '');
         if (/^\d{8,24}$/.test(id) && value.video && typeof value.video === 'object') { ids.add(id); return; }
         for (const key of Object.keys(value).slice(0, 80)) {
           if (['return', 'child', 'sibling', 'stateNode', '_owner'].includes(key)) continue;
-          try { find(value[key], depth + 1); } catch {}
+          try { await find(value[key], depth + 1); } catch {}
           if (ids.size > 1) return;
         }
       }
@@ -34,8 +35,8 @@ export function douyinPreviewTargets() {
       for (const key of Object.keys(parent).filter(key => /^__react(?:Props|Fiber)\$/.test(key)).slice(0, 4)) {
         try {
           const value = parent[key];
-          if (key.startsWith('__reactProps')) find(value);
-          else { find(value?.memoizedProps); find(value?.pendingProps); }
+          if (key.startsWith('__reactProps')) await find(value);
+          else { await find(value?.memoizedProps); await find(value?.pendingProps); }
         } catch {}
       }
       if (ids.size === 1) return [...ids][0];
@@ -57,7 +58,7 @@ export function douyinPreviewTargets() {
   for (const node of seeds) {
     if (++examined > 1200 || results.size >= 36) break;
     if (!visible(node)) continue;
-    let id = nearbyIdentity(node);
+    await yieldMain();let id = await nearbyIdentity(node);
     // A video page may have no anchor around its current player. Do not apply
     // the page id to images or to multiple simultaneously visible players.
     if (!id && node.tagName === 'VIDEO' && videos.length === 1) id = pageId;

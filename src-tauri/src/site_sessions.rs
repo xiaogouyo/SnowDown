@@ -748,7 +748,10 @@ async fn read_video_inner(
         .replace(
             "__CAPTURE_PAGE_SOURCE__",
             &include_str!("../../extension/page.js")
-                .replace("export function capturePage", "function capturePage"),
+                .replace("export async function capturePage", "function capturePage")
+                .replace("async function find", "function find")
+                .replace("async()=>", "()=>")
+                .replace("await ", ""),
         );
     let mut data: serde_json::Value;
     let (tx, rx) = tokio::sync::oneshot::channel();

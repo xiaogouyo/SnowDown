@@ -14,13 +14,17 @@ export function detailVideo(page){
  if(!streams.length&&video.consumer?.originVideoKey)streams.push({url:`https://sns-video-bd.xhscdn.com/${video.consumer.originVideoKey}`,label:'原始画质'});
  return streams.length?{title:source.title||source.desc||page.title,cover:source.imageList?.[0]?.urlDefault||'',author:source.user?.nickname||'',streams,detail:page.detail}:null;
 }
-export async function biliVideo(page){
+export async function biliInputs(page){
  const query=new URL(page.url);let id=page.id;
  if(!id)throw Error('请打开一个B站视频页面。');
- const get=async url=>{const response=await fetch(url,{credentials:'include'});if(!response.ok)throw Error(`B站返回 ${response.status}`);const data=await response.json();if(data.code!==0)throw Error(data.message||'B站解析失败');return data.data};
+ const get=async url=>{const response=await fetch(url,{credentials:'include',signal:AbortSignal.timeout(8000)});if(!response.ok)throw Error(`B站返回 ${response.status}`);const data=await response.json();if(data.code!==0)throw Error(data.message||'B站解析失败');return data.data};
  const data=await get(`https://api.bilibili.com/x/web-interface/view?bvid=${id}`);
  const current=data.pages?.find(p=>p.page===Number(query.searchParams.get('p')||1))||data.pages?.[0];
  const play=await get(`https://api.bilibili.com/x/player/playurl?bvid=${id}&cid=${current?.cid||data.cid}&qn=64&fnval=4048&fourk=1`);
+ return {data,play};
+}
+export async function biliVideo(page){
+ const {data,play}=page.biliData||await biliInputs(page);
  const audio=play.dash?.audio?.sort((a,b)=>b.bandwidth-a.bandwidth)[0];
  const streams=play.dash?.video?.filter(s=>s.codecid===7).sort((a,b)=>b.id-a.id).map(s=>({url:s.baseUrl||s.base_url,audio:audio?.baseUrl||audio?.base_url,width:s.width,height:s.height,quality:s.id,label:play.accept_description?.[play.accept_quality?.indexOf(s.id)]||`${s.height}P`}))||play.durl?.map(s=>({url:s.url,label:'原始画质'}))||[];
  if(!streams.length)throw Error('当前账号没有可下载画质。');

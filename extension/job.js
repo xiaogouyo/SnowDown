@@ -24,5 +24,5 @@ try{
   download=await chrome.downloads.download({url:objectUrl,filename:`SnowDown/${safeName(job.title)}.${extension}`,saveAs:false});
  }
  await chrome.storage.session.remove(key);text.textContent='浏览器下载已开始，可在浏览器下载列表查看。';document.querySelector('progress').value=100;
- if(objectUrl)chrome.downloads.onChanged.addListener(delta=>{if(delta.id===download&&['complete','interrupted'].includes(delta.state?.current)){URL.revokeObjectURL(objectUrl);text.textContent=delta.state.current==='complete'?'下载完成。':'下载已中断，请在插件中重试。'}});
+ chrome.downloads.onChanged.addListener(delta=>{if(delta.id===download&&['complete','interrupted'].includes(delta.state?.current)){if(objectUrl)URL.revokeObjectURL(objectUrl);text.textContent=delta.state.current==='complete'?'下载完成。':'下载已中断，请重新解析后重试。'}});
 }catch(error){text.textContent=error.message;document.querySelector('progress').hidden=true;await chrome.storage.session.remove(key)}

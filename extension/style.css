@@ -24,3 +24,5 @@ body.popup-shell{width:440px;min-height:420px;max-height:600px;overflow:auto;bac
 
 /* Compact format menu: keep SnowDown's original mark and blue palette. */
 .quick-formats{margin:12px -5px 4px;display:grid;gap:3px}.format-row{display:flex;align-items:center;gap:14px;min-height:44px;padding:9px 12px;background:white;color:#465771;border-radius:10px;text-align:left;transition:transform .18s,background .18s,box-shadow .18s}.format-row:hover{transform:translateY(-2px);background:#f0f6ff;box-shadow:0 4px 13px #387add12}.format-row:active{transform:scale(.98)}.format-icon,.format-arrow{color:#438fff;font-size:21px}.format-arrow{margin-left:auto}.has-video .intro{padding-bottom:8px}.has-video article{box-shadow:0 8px 30px #284c8010}article label,article #quality,article #downloadVideo{display:none}article #cover{height:116px}.page-layout article #cover{height:auto;max-height:250px}.page-layout .quick-formats{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+
+#reparse{margin-top:8px;font-size:11px;padding:8px 12px}button:disabled{cursor:wait;opacity:.65}

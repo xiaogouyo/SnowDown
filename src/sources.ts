@@ -2,6 +2,8 @@ import type { Platform, SourceLink } from './types'
 import sites from '../shared/platforms.json'
 
 export const platformLabels: Record<Platform, string> = { bilibili: 'B站', douyin: '抖音', xiaohongshu: '小红书', web: '网页视频' }
+export const supportedSiteCount = sites.length
+export const supportedSiteNames = sites.map(site => site.label).join('、')
 const matches = (host: string, base: string) => host === base || host.endsWith(`.${base}`)
 export function sourceLabel(source: {platform: Platform; url?: string; sourceUrl?: string}): string {
   if(source.platform !== 'web') return platformLabels[source.platform]
