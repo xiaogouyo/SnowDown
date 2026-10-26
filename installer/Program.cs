@@ -71,6 +71,11 @@ namespace SnowDown.Setup
             foreach (string argument in args)
                 if (argument.StartsWith("/D=", StringComparison.Ordinal)) directory = argument.Substring(3);
             InstallerCore.CheckDirectory(directory);
+            bool autostart = InstallerCore.DefaultAutostart(directory);
+            foreach (string argument in args) {
+                if (argument == "/AUTOSTART=0") autostart = false;
+                if (argument == "/AUTOSTART=1") autostart = true;
+            }
             string previous = InstallerCore.ReadInstalledManifest(directory);
             string temporary = NewTemporaryDirectory();
             try
@@ -83,6 +88,7 @@ namespace SnowDown.Setup
                     InstallerCore.Log("Backend exit=" + backend.ExitCode + "; stage=" + (File.Exists(stage) ? File.ReadAllText(stage).Trim() : "unknown"));
                     if (backend.ExitCode != 0 && backend.ExitCode != 3010) throw new IOException("安装后端返回 " + backend.ExitCode + "，请关闭占用程序并检查安装权限后重试。");
                     InstallerCore.FinalizeInstalled(directory, previous);
+                    InstallerCore.ConfigureAutostart(directory, autostart);
                     InstallerCore.Log("Installed files verified successfully.");
                     if (updateDirectory != null) Process.Start(new ProcessStartInfo(Path.Combine(directory,"snowdown.exe")) { UseShellExecute = true, WorkingDirectory = directory });
                     return backend.ExitCode;
@@ -111,6 +117,8 @@ namespace SnowDown.Setup
         private readonly TextBlock progressTitle;
         private readonly TextBlock progressDetail;
         private readonly CheckBox launch;
+        private readonly CheckBox startup;
+        private bool startupChosen;
         private readonly Grid readyPanel;
         private readonly StackPanel progressPanel;
         private readonly ProgressBar progress;
@@ -142,7 +150,11 @@ namespace SnowDown.Setup
             progressPanel = (StackPanel)Window.FindName("ProgressPanel");
             progress = (ProgressBar)Window.FindName("Progress");
             launch = (CheckBox)Window.FindName("LaunchAfter");
+            startup = (CheckBox)Window.FindName("Autostart");
             installPath.Text = preview ? @"D:\Apps\SnowDown" : updateDirectory ?? InstallerCore.DefaultDirectory();
+            if (!preview) startup.IsChecked = InstallerCore.DefaultAutostart(installPath.Text);
+            startup.Click += delegate { startupChosen = true; };
+            installPath.TextChanged += delegate { if (!preview && !startupChosen) { try { startup.IsChecked = InstallerCore.DefaultAutostart(installPath.Text); } catch (ArgumentException) { } } };
             ((TextBlock)Window.FindName("Version")).Text = "v" + BuildInfo.Version + " · Windows x64";
             using (Stream icon = Assembly.GetExecutingAssembly().GetManifestResourceStream("SnowDown.Icon"))
                 Window.Icon = BitmapFrame.Create(icon, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
@@ -202,6 +214,8 @@ namespace SnowDown.Setup
             try
             {
                 installedDirectory = InstallerCore.NormalizePath(installPath.Text);
+                bool autostart = startup.IsChecked == true;
+                startup.IsEnabled = false;
                 string previous = InstallerCore.ReadInstalledManifest(installedDirectory);
                 InstallerCore.CheckDirectory(installedDirectory);
                 SetBusy();
@@ -230,6 +244,7 @@ namespace SnowDown.Setup
                     throw new IOException(stage == "running" ? InstallerCore.StageText(stage) : "安装未完成（" + exitCode + "），请检查磁盘空间和文件权限后重试。");
                 }
                 InstallerCore.FinalizeInstalled(installedDirectory,previous);
+                InstallerCore.ConfigureAutostart(installedDirectory,autostart);
                 InstallerCore.Log("Installed files verified successfully.");
                 SetComplete();
                 if (exitCode == 3010) status.Text = "组件更新将在重新启动 Windows 后完成。";
@@ -241,7 +256,7 @@ namespace SnowDown.Setup
                 readyPanel.Visibility = Visibility.Visible;
                 progressPanel.Visibility = Visibility.Collapsed;
                 action.IsEnabled = true; browse.IsEnabled = true; close.IsEnabled = true;
-                installPath.IsEnabled = true; launch.IsEnabled = true;
+                installPath.IsEnabled = true; launch.IsEnabled = true; startup.IsEnabled = true;
                 actionText.Text = "重试安装";
                 status.Foreground = new SolidColorBrush(Color.FromRgb(194, 102, 111));
                 status.Text = error.Message + " 日志：" + InstallerCore.LogPath;

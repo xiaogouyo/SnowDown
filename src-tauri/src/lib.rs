@@ -1,4 +1,5 @@
 mod auth;
+mod autostart;
 mod batch;
 #[cfg(debug_assertions)]
 mod batch_probe;
@@ -635,6 +636,11 @@ fn open_download_directory(app: AppHandle, state: State<'_, Arc<AppState>>) -> R
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn autostart_status() -> Result<autostart::Status, String> { autostart::status() }
+#[tauri::command]
+fn set_autostart(enabled: bool) -> Result<autostart::Status, String> { autostart::set(enabled) }
+
 fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -663,8 +669,8 @@ fn find_ffmpeg(app: &AppHandle) -> Option<PathBuf> {
 
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            show_main(app)
+        .plugin(tauri_plugin_single_instance::init(|app, args, _| {
+            if !autostart::background(args) { show_main(app); }
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -854,6 +860,8 @@ pub fn run() {
                 auth_state.auth.validate().await;
                 auth_state.emit(&auth_handle);
             });
+            autostart::reconcile();
+            if !autostart::background(std::env::args()) { show_main(&handle); }
             engine::start_scheduler(handle, state);
             Ok(())
         })
@@ -866,6 +874,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            autostart_status,
+            set_autostart,
             get_snapshot,
             update_status,
             check_update,

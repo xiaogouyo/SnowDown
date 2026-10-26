@@ -93,7 +93,8 @@
       <Button x:Name="Install" Canvas.Left="566" Canvas.Top="449" Width="370" Height="60" Style="{StaticResource PrimaryButton}">
         <StackPanel Orientation="Horizontal"><Path x:Name="DownloadIcon" Data="M 11,0 V 19 M 3,11 L 11,20 L 19,11 M 0,26 H 22" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Margin="0,0,17,0" VerticalAlignment="Center"/><TextBlock x:Name="ActionText" Text="立即安装"/></StackPanel>
       </Button>
-      <CheckBox x:Name="LaunchAfter" Canvas.Left="666" Canvas.Top="533" Foreground="#7E98BA" FontSize="12" IsChecked="True" Content="安装完成后启动"/>
+      <CheckBox x:Name="LaunchAfter" Canvas.Left="580" Canvas.Top="533" Foreground="#7E98BA" FontSize="12" IsChecked="True" Content="安装完成后启动"/>
+      <CheckBox x:Name="Autostart" Canvas.Left="773" Canvas.Top="533" Foreground="#7E98BA" FontSize="12" IsChecked="True" Content="开机自启动" AutomationProperties.Name="开机自启动"/>
       <TextBlock x:Name="Status" Canvas.Left="566" Canvas.Top="569" Width="370" TextAlignment="Center" FontSize="11" Foreground="#8FA4BF" TextWrapping="Wrap"/>
       <TextBlock x:Name="Version" Canvas.Left="644" Canvas.Top="600" Foreground="#A3B8D4" FontSize="10"/>
       <Path Canvas.Left="923" Canvas.Top="561" Data="M 12,0 V 24 M 2,6 L 22,18 M 2,18 L 22,6 M 7,2 L 12,7 L 17,2 M 7,22 L 12,17 L 17,22" Stroke="#CEE3FF" StrokeThickness="1.7" IsHitTestVisible="False"/>

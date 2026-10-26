@@ -20,6 +20,13 @@ namespace SnowDown.Setup
         private static int Main(string[] args)
         {
             if (args.Length == 1 && args[0] == "--wait-fixture") { System.Threading.Thread.Sleep(300); return 0; }
+            Check(InstallerCore.DefaultAutostart(false,false,false),"fresh install defaults to startup");
+            Check(!InstallerCore.DefaultAutostart(true,false,false),"upgrade preserves opt-out");
+            Check(InstallerCore.DefaultAutostart(true,true,false),"upgrade preserves opt-in");
+            Check(!InstallerCore.DefaultAutostart(true,true,true),"upgrade respects Windows disable");
+            Check(InstallerCore.OwnedStartup("\"D:\\应用 文件\\SnowDown.exe\" --autostart"),"quoted startup command recognized");
+            Check(!InstallerCore.OwnedStartup("\" --autostart"),"malformed startup command rejected");
+            Check(!InstallerCore.OwnedStartup("\"D:\\other.exe\" --autostart"),"unrelated startup command rejected");
             Check(InstallerCore.NormalizePath(@"D:\应用 文件\SnowDown\") == @"D:\应用 文件\SnowDown", "Unicode path");
             Check(InstallerCore.BackendArguments(@"D:\应用 文件\SnowDown") == @"/S /D=D:\应用 文件\SnowDown", "NSIS last unquoted directory");
             Check(InstallerCore.UpdateDirectory(new[] { @"--update-dir=D:\应用 文件\SnowDown", "--wait-pid=123" }) == @"D:\应用 文件\SnowDown", "updater keeps current Unicode directory");

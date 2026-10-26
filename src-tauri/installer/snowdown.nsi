@@ -953,6 +953,13 @@ FunctionEnd
 
 Section Uninstall
 
+  ; Remove only the startup entry targeting this installation.
+  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "SnowDown"
+  ${If} $0 == '$\"$INSTDIR\${MAINBINARYNAME}.exe$\" --autostart'
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "SnowDown"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "SnowDown"
+  ${EndIf}
+
   !ifmacrodef NSIS_HOOK_PREUNINSTALL
     !insertmacro NSIS_HOOK_PREUNINSTALL
   !endif

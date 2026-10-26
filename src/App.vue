@@ -12,6 +12,7 @@ import BatchDownload from './components/BatchDownload.vue'
 import UpdateCenter from './components/UpdateCenter.vue'
 import MinimalMode from './components/MinimalMode.vue'
 import BrowserExtension from './components/BrowserExtension.vue'
+import AutostartToggle from './components/AutostartToggle.vue'
 import { prepareModeMorph } from './modeMorph'
 import './modeMorph.css'
 import { identifySource, platformLabels, sourceSummary, sourceLabel } from './sources'
@@ -588,6 +589,8 @@ onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); u
         <div class="modal-header"><div><span class="eyebrow">MAKE IT YOURS</span><h2 id="settings-title">偏好设置</h2></div><button class="icon-button" aria-label="关闭设置" @click="dialog = null"><X :size="20" /></button></div>
         <div class="settings-tabs"><button :class="{ active: settingsTab === 'download' }" @click="settingsTab = 'download'"><SlidersHorizontal :size="15" />下载设置</button><button :class="{ active: settingsTab === 'account' }" @click="settingsTab = 'account'"><UserRound :size="15" />平台账号</button></div>
         <div v-if="settingsTab === 'download'" class="settings-content">
+          <AutostartToggle />
+          <div class="settings-divider"></div>
           <label class="field-label">下载位置</label><div class="folder-field"><FolderOpen :size="17" /><input v-model="settingsDraft.downloadDir" placeholder="选择本地文件夹" aria-label="下载位置" /><button @click="chooseFolder">浏览</button></div>
           <div class="settings-two-col"><div><span class="field-label">同时下载任务数</span><UiSelect :model-value="settingsDraft.concurrency" :options="concurrencyOptions" label="同时下载任务数" @update:model-value="value => settingsDraft.concurrency = Number(value)" /></div><div><span class="field-label">每文件下载连接数</span><UiSelect :model-value="settingsDraft.downloadConnections ?? 8" :options="connectionOptions" label="每文件下载连接数" @update:model-value="value => settingsDraft.downloadConnections = Number(value)" /><small>视频与更新共用；服务器支持时并行分段，继续下载后生效</small></div></div><div class="settings-two-col"><label><span class="field-label">单任务限速（MB/s）</span><input v-model.number="settingsDraft.maxSpeedMbps" type="number" min="0" max="1024" /><small>设为 0 表示不限速</small></label></div>
           <div class="settings-divider"></div><h3 class="settings-section-title">剪贴板与快速解析</h3>

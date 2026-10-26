@@ -13,6 +13,39 @@ namespace SnowDown.Setup
     internal static class InstallerCore
     {
         internal const string ManifestName = ".snowdown-program-files.v1";
+        internal const string StartupRun = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        internal const string StartupApproved = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
+        internal static bool DefaultAutostart(bool installed, bool registered, bool blocked)
+        { return installed ? registered && !blocked : true; }
+        internal static bool OwnedStartup(string value)
+        {
+            if (String.IsNullOrEmpty(value) || value.Length <= 14 || !value.StartsWith("\"", StringComparison.Ordinal) || !value.EndsWith("\" --autostart", StringComparison.Ordinal)) return false;
+            string file = value.Substring(1,value.Length-14);
+            return Path.IsPathRooted(file) && Path.GetFileName(file).Equals("snowdown.exe",StringComparison.OrdinalIgnoreCase);
+        }
+        internal static bool DefaultAutostart(string directory)
+        {
+            bool installed = File.Exists(Path.Combine(directory,"snowdown.exe")) || File.Exists(Path.Combine(directory,"uninstall.exe"));
+            using (RegistryKey run = Registry.CurrentUser.OpenSubKey(StartupRun))
+            using (RegistryKey approved = Registry.CurrentUser.OpenSubKey(StartupApproved))
+            {
+                bool registered = OwnedStartup(run == null ? null : run.GetValue("SnowDown") as string);
+                byte[] bytes = approved == null ? null : approved.GetValue("SnowDown") as byte[];
+                bool blocked = bytes != null && bytes.Length > 0 && bytes[0] != 2 && bytes[0] != 6;
+                return DefaultAutostart(installed,registered,blocked);
+            }
+        }
+        internal static void ConfigureAutostart(string directory, bool enabled)
+        {
+            using (RegistryKey run = Registry.CurrentUser.CreateSubKey(StartupRun))
+            {
+                string old = run.GetValue("SnowDown") as string;
+                if (old != null && !OwnedStartup(old)) throw new IOException("同名启动项不属于 SnowDown，请在 Windows 启动应用中检查。");
+                if (enabled) run.SetValue("SnowDown","\"" + Path.Combine(NormalizePath(directory),"snowdown.exe") + "\" --autostart",RegistryValueKind.String);
+                else run.DeleteValue("SnowDown",false);
+            }
+            if(enabled) using(RegistryKey approved=Registry.CurrentUser.OpenSubKey(StartupApproved,true)) { if(approved!=null) approved.DeleteValue("SnowDown",false); }
+        }
         internal static string LogPath;
         internal static void Log(string message)
         {
