@@ -340,7 +340,7 @@ impl Extractor {
         let _tree = ProcessTree::attach(&child)?;
         let stdout = child.stdout.take().ok_or("解析输出不可用。")?;
         let stderr = child.stderr.take().ok_or("解析输出不可用。")?;
-        let result = tokio::time::timeout(Duration::from_secs(45), async {
+        let result = tokio::time::timeout(Duration::from_secs(60), async {
             let out = async {
                 let mut bytes = vec![];
                 stdout
@@ -372,7 +372,13 @@ impl Extractor {
         }
         let value: Value = serde_json::from_slice(&bytes).map_err(|_| "网站视频数据无效。")?;
         let info = metadata(source, &value)?;
-        self.remember(source, info.clone(), None);
+        // Keep solved YouTube formats in the short-lived cache. Downloading
+        // immediately after inspection must not repeat player challenges.
+        let youtube = url::Url::parse(&source.url).ok().is_some_and(|u| {
+            matches!(u.host_str(), Some("youtu.be"))
+                || sites::host_matches(u.host_str().unwrap_or_default(), "youtube.com")
+        });
+        self.remember(source, info.clone(), youtube.then_some(value));
         Ok(info)
     }
 }
@@ -463,6 +469,11 @@ pub async fn run(
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
             .and_then(|data| {
+                // Browser captures need master-playlist expansion; native
+                // extractor JSON already contains complete audio/video formats.
+                if data["extractor"] != "generic" {
+                    return None;
+                }
                 data["formats"].as_array().and_then(|f| {
                     f.iter()
                         .find_map(|f| f["manifest_url"].as_str().map(str::to_owned))

@@ -1,5 +1,6 @@
-import {Input,ALL_FORMATS,UrlSource,Output,Mp4OutputFormat,BufferTarget,Conversion} from 'mediabunny';
+import {Input,ALL_FORMATS,UrlSource,BufferSource,Output,Mp4OutputFormat,BufferTarget,Conversion} from 'mediabunny';
 import {safeName,safeUrl} from './core.js';
+import {youtubeRangeFetch,youtubeDownloadBuffer} from './youtube-download.js';
 const text=document.querySelector('#status'),title=document.querySelector('h1');
 const jobId=new URL(location.href).searchParams.get('id'),key=`job:${jobId}`;
 let objectUrl;
@@ -12,8 +13,12 @@ try{
  if(!job.stream.audio&&!audioOnly&&!manifest){text.textContent='正在交给浏览器下载…';download=await chrome.downloads.download({url:job.stream.url,filename:`SnowDown/${safeName(job.title)}.${extension}`,saveAs:false});}
  else{
   text.textContent='正在读取并合并音视频，请保留此页面…';
-  const video=new Input({formats:ALL_FORMATS,source:new UrlSource(audioOnly?(job.stream.audio||job.stream.url):job.stream.url,{requestInit:{credentials:'include'}})});
-  const audio=!audioOnly&&job.stream.audio?new Input({formats:ALL_FORMATS,source:new UrlSource(job.stream.audio,{requestInit:{credentials:'include'}})}):null;
+  const options={requestInit:{credentials:'include'},fetchFn:youtubeRangeFetch,getRetryDelay:attempt=>attempt<=2?attempt:null};
+  const videoUrl=audioOnly?(job.stream.audio||job.stream.url):job.stream.url;
+  const audioUrl=!audioOnly?job.stream.audio:null;
+  const [videoBytes,audioBytes]=await Promise.all([youtubeDownloadBuffer(videoUrl),audioUrl?youtubeDownloadBuffer(audioUrl):null]);
+  const video=new Input({formats:ALL_FORMATS,source:videoBytes?new BufferSource(videoBytes):new UrlSource(videoUrl,options)});
+  const audio=audioUrl?new Input({formats:ALL_FORMATS,source:audioBytes?new BufferSource(audioBytes):new UrlSource(audioUrl,options)}):null;
   const target=new BufferTarget(),output=new Output({format:new Mp4OutputFormat(),target});
   const v=await Conversion.init({input:video,output,...(audioOnly?{video:{discard:true}}:audio?{audio:{discard:true}}:{}),composable:true});
   const a=audio?await Conversion.init({input:audio,output,video:{discard:true},composable:true}):null;

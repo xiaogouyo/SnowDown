@@ -308,7 +308,7 @@ pub fn native_host() -> bool {
             )
             .ok()?;
             stream
-                .set_read_timeout(Some(Duration::from_secs(40)))
+                .set_read_timeout(Some(Duration::from_secs(95)))
                 .ok()?;
             stream
                 .set_write_timeout(Some(Duration::from_secs(5)))
@@ -375,7 +375,7 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
             let token = token.clone();
             tauri::async_runtime::spawn(async move {
                 let _permit = permit;
-                let _ = tokio::time::timeout(Duration::from_secs(40), async {
+                let _ = tokio::time::timeout(Duration::from_secs(90), async {
                     let size = socket.read_u32_le().await.ok()? as usize;
                     if size == 0 || size > MAX {
                         return None;

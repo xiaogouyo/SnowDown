@@ -5,7 +5,8 @@ import {downloadRows} from './media.js';
 import {expandManifests} from './manifests.js';
 import {siteOf,previewUrl} from './catalog.js';
 import {douyinPreviewTargets} from './douyin-preview.js';
-import {youtubeId,youtubeMedia,observedYoutubeMedia} from './youtube.js';
+import {youtubeId,youtubeMedia,observedYoutubeMedia,youtubeQualities} from './youtube.js';
+import {youtubePagePlayer} from './youtube-player.js';
 import {biliInputs} from './sites.js';
 import {ParseCache,createLimiter} from './parse-cache.js';
 import {parseInWorker} from './parser-client.js';
@@ -35,12 +36,13 @@ async function resolvePageWork(tabId,targetUrl=null,preview=null){
  let page=await pageFor(tabId,false,targetUrl);if(preview){page.title=preview.title||page.title;page.cover=preview.cover||page.cover;}
  if(page.platform!=='web'&&page.platform){try{return {page,video:await parseVideo(page)}}catch(original){const state=await heartbeat();if(state.connected){const result=await call('inspect',{url:page.url},18000);if(result.data?.streams?.length)return {page,video:result.data};}throw original;}}
  const youtube=page.site?.id==='youtube',videoId=youtubeId(page.url);
- if(youtube){page.media=(page.media||[]).filter(item=>{try{return /(^|\.)googlevideo\.com$/.test(new URL(item.url).hostname)}catch{return false}});if(!page.media.length)page.media=observedYoutubeMedia(network.get(tabId)||[],videoId);}
+ if(youtube){const official=youtubeMedia(page.youtubeResponse,videoId);page.media=official.length?official:(page.media||[]).filter(item=>{try{return /(^|\.)googlevideo\.com$/.test(new URL(item.url).hostname)&&!new URL(item.url).searchParams.has('n')}catch{return false}});if(!page.media.length)page.media=observedYoutubeMedia(network.get(tabId)||[],videoId);}
  if(!youtube&&!preview&&page.singleVisibleVideo&&!page.media?.length){page.media=(network.get(tabId)||[]).filter(r=>['video','manifest'].includes(r.kind)&&!/[.](?:m4s|mpd)(?:$|\?)/.test(r.url)).slice(-8);}
- page.media=await expandManifests(page.media||[],(text,base)=>parseInWorker('hls',{text,base}));let video=await parseInWorker('generic',page);
- if(!video&&(targetUrl||youtube)){try{const result=(await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:linkedPageMedia,args:[targetUrl||page.url]}))[0]?.result;if(result){page={...page,...result};if(youtube)page.media=youtubeMedia(result.youtubeResponse,videoId);video=await parseInWorker('generic',page);}}catch{}}
+ page.media=await expandManifests(page.media||[],(text,base)=>parseInWorker('hls',{text,base}));if(youtube)page.media=youtubeQualities(page.media);let video=await parseInWorker('generic',page);
+ if(!video&&(targetUrl||youtube)){try{const result=(await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:linkedPageMedia,args:[targetUrl||page.url]}))[0]?.result;if(result){page={...page,...result};if(youtube)page.media=await expandManifests(youtubeMedia(result.youtubeResponse,videoId),(text,base)=>parseInWorker('hls',{text,base}));if(youtube)page.media=youtubeQualities(page.media);video=await parseInWorker('generic',page);}}catch{}}
+ if(!video&&youtube){try{const response=(await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:youtubePagePlayer,args:[page.url]}))[0]?.result;if(response){const info=response.videoDetails;page={...page,title:info.title||page.title,author:info.author||'',cover:info.thumbnail?.thumbnails?.at(-1)?.url||page.cover,duration:Number(info.lengthSeconds)||0,media:await expandManifests(youtubeMedia(response,videoId),(text,base)=>parseInWorker('hls',{text,base}))};page.media=youtubeQualities(page.media);video=await parseInWorker('generic',page)}}catch{}}
  if(video){page.detail=video.detail;return {page,video};}
- const state=await heartbeat();if(state.connected&&page.platform==='web'){const result=await call('inspect',{url:page.url},youtube?22000:18000);if(result.error)throw Error(youtube?`YouTube：${result.error} 若提示登录或验证，请在浏览器打开并播放目标视频后重新读取。`:result.error);if(result.data?.streams?.length)return {page,video:result.data};}
+ const state=await heartbeat();if(state.connected&&page.platform==='web'){const result=await call('inspect',{url:page.url},youtube?70000:18000);if(result.error)throw Error(youtube?`YouTube：${result.error} 若提示登录或验证，请在浏览器打开并播放目标视频后重新读取。`:result.error);if(result.data?.streams?.length)return {page,video:result.data};}
  if(youtube)throw Error('此 YouTube 视频尚未提供可直接下载的资源。请打开并播放目标视频后重试；签名资源可启动 SnowDown 桌面解析，登录验证需在官方页面完成。');
  throw Error(page.platform==='web'?'此页面暂未提供直接视频资源。可连接 SnowDown 桌面端解析，或播放目标视频后重试。':'请打开一个视频页面，或切换到网页资源模式。');
 }
