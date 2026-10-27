@@ -40,7 +40,7 @@ pub struct BrowserStatus {
 }
 fn extension_status(version: Option<&str>, revision: Option<&str>, bundled: &str) -> (bool,bool) {
     let outdated=version.and_then(|v|semver::Version::parse(v).ok()).zip(semver::Version::parse(bundled).ok()).is_some_and(|(installed,current)|installed<current);
-    (outdated,version.is_none() || version==Some(bundled)&&revision!=Some("desktop-0.2.13"))
+    (outdated,version.is_none() || version==Some(bundled)&&revision!=Some("desktop-0.2.14"))
 }
 #[cfg(test)]
 mod version_tests {
@@ -50,7 +50,7 @@ mod version_tests {
         assert_eq!(extension_status(Some("0.1.5"),None,"0.1.6"),(true,false));
         assert_eq!(extension_status(None,None,"0.1.6"),(false,true));
         assert_eq!(extension_status(Some("0.1.6"),None,"0.1.6"),(false,true));
-        assert_eq!(extension_status(Some("0.1.6"),Some("desktop-0.2.13"),"0.1.6"),(false,false));
+        assert_eq!(extension_status(Some("0.1.6"),Some("desktop-0.2.14"),"0.1.6"),(false,false));
         assert_eq!(extension_status(Some("0.1.7"),None,"0.1.6"),(false,false));
     }
 }

@@ -19,6 +19,52 @@ use tokio::{
     process::{Child, Command},
 };
 
+async fn inspect_output(mut cmd: Command, budget_secs: u64) -> Result<Value, String> {
+    let mut child = cmd.spawn().map_err(|_| "无法启动多站点解析组件。")?;
+    let _tree = ProcessTree::attach(&child)?;
+    let stdout = child.stdout.take().ok_or("解析输出不可用。")?;
+    let stderr = child.stderr.take().ok_or("解析输出不可用。")?;
+    let result = tokio::time::timeout(Duration::from_secs(budget_secs), async {
+        let out = async {
+            let mut bytes = vec![];
+            stdout
+                .take(8 * 1024 * 1024 + 1)
+                .read_to_end(&mut bytes)
+                .await
+                .map(|_| bytes)
+        };
+        let err = async {
+            let mut bytes = vec![];
+            stderr
+                .take(8192)
+                .read_to_end(&mut bytes)
+                .await
+                .map(|_| bytes)
+        };
+        tokio::join!(child.wait(), out, err)
+    })
+    .await
+    .map_err(|_| "网站解析超时，请在浏览器播放目标视频后使用插件读取。")?;
+    let status = result.0.map_err(|_| "解析组件异常退出。")?;
+    let bytes = result.1.map_err(|_| "解析输出读取失败。")?;
+    let errors = result.2.unwrap_or_default();
+    if !status.success() {
+        return Err(safe_error(&errors));
+    }
+    if bytes.len() > 8 * 1024 * 1024 {
+        return Err("网站返回数据过大。".into());
+    }
+    let value: Value = serde_json::from_slice(&bytes).map_err(|_| "网站视频数据无效。")?;
+    Ok(value)
+}
+
+fn is_youtube(source: &sites::Source) -> bool {
+    url::Url::parse(&source.url).ok().is_some_and(|u| {
+        sites::host_matches(u.host_str().unwrap_or_default(), "youtube.com")
+            || u.host_str() == Some("youtu.be")
+    })
+}
+
 pub struct Extractor {
     cache: Mutex<HashMap<String, (Instant, VideoInfo, Option<Value>)>>,
     gate: tokio::sync::Semaphore,
@@ -336,48 +382,33 @@ impl Extractor {
             .env("no_proxy", "");
         cmd.args(["--dump-single-json", "--skip-download", "--"])
             .arg(&source.url);
-        let mut child = cmd.spawn().map_err(|_| "无法启动多站点解析组件。")?;
-        let _tree = ProcessTree::attach(&child)?;
-        let stdout = child.stdout.take().ok_or("解析输出不可用。")?;
-        let stderr = child.stderr.take().ok_or("解析输出不可用。")?;
-        let result = tokio::time::timeout(Duration::from_secs(60), async {
-            let out = async {
-                let mut bytes = vec![];
-                stdout
-                    .take(8 * 1024 * 1024 + 1)
-                    .read_to_end(&mut bytes)
-                    .await
-                    .map(|_| bytes)
-            };
-            let err = async {
-                let mut bytes = vec![];
-                stderr
-                    .take(8192)
-                    .read_to_end(&mut bytes)
-                    .await
-                    .map(|_| bytes)
-            };
-            tokio::join!(child.wait(), out, err)
-        })
-        .await
-        .map_err(|_| "网站解析超时，请在浏览器播放目标视频后使用插件读取。")?;
-        let status = result.0.map_err(|_| "解析组件异常退出。")?;
-        let bytes = result.1.map_err(|_| "解析输出读取失败。")?;
-        let errors = result.2.unwrap_or_default();
-        if !status.success() {
-            return Err(safe_error(&errors));
-        }
-        if bytes.len() > 8 * 1024 * 1024 {
-            return Err("网站返回数据过大。".into());
-        }
-        let value: Value = serde_json::from_slice(&bytes).map_err(|_| "网站视频数据无效。")?;
+        let youtube = is_youtube(source);
+        let value = if youtube {
+            let mut quick = command(app)?;
+            quick
+                .arg("--proxy")
+                .arg(&proxy.url)
+                .env("NO_PROXY", "")
+                .env("no_proxy", "");
+            quick
+                .args([
+                    "--extractor-args",
+                    "youtube:player_client=visionos;skip=hls,dash",
+                    "--dump-single-json",
+                    "--skip-download",
+                    "--",
+                ])
+                .arg(&source.url);
+            match inspect_output(quick, 12).await {
+                Ok(value) if metadata(source, &value).is_ok() => value,
+                _ => inspect_output(cmd, 45).await?,
+            }
+        } else {
+            inspect_output(cmd, 60).await?
+        };
         let info = metadata(source, &value)?;
         // Keep solved YouTube formats in the short-lived cache. Downloading
         // immediately after inspection must not repeat player challenges.
-        let youtube = url::Url::parse(&source.url).ok().is_some_and(|u| {
-            matches!(u.host_str(), Some("youtu.be"))
-                || sites::host_matches(u.host_str().unwrap_or_default(), "youtube.com")
-        });
         self.remember(source, info.clone(), youtube.then_some(value));
         Ok(info)
     }

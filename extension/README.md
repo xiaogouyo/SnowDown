@@ -1,6 +1,8 @@
-# SnowDown 浏览器插件 v0.1.13
+# SnowDown 浏览器插件 v0.1.14
 
-支持 Google Chrome / Microsoft Edge（Chromium 116 或更新版本）。这是 Manifest V3 插件，可独立下载，也可连接 Windows 桌面版 SnowDown v0.2.13。
+支持 Google Chrome / Microsoft Edge（Chromium 116 或更新版本）。这是 Manifest V3 插件，可独立下载，也可连接 Windows 桌面版 SnowDown v0.2.14。
+
+v0.1.14 优先官方播放器接口，成功时不再重复请求完整视频网页；没有媒体时跳过空解析。保留网页和桌面回退、原 Logo、位置、缓存和下载方式。[验证记录](../docs/releases/extension-v0.1.14-verification.md)。
 
 v0.1.13 使用官方播放器接口读取 YouTube 公开视频和 Shorts，支持真实画质、音频合并及下载；有限分块校验、小文件完整读取，避免网络读取阻塞合并。未知大小或超过每个输入 128 MiB 的视频使用流式读取，大文件建议桌面下载。官方登录和访问限制按实际状态处理。[验证记录](../docs/releases/extension-v0.1.13-verification.md)。
 
@@ -26,7 +28,7 @@ v0.1.3 同步支持精选列表响应和已播放页面的 React 播放器数据
 
 推荐从桌面软件左侧“浏览器插件”贴片选择浏览器。软件会准备稳定的插件目录、注册当前用户的原生消息通道、打开扩展管理页与文件夹。开启开发者模式，选择“加载已解压的扩展”，选择软件显示的目录即可。首次连接默认启用桌面转发和账号同步，可在插件设置中关闭。
 
-独立使用：下载 `SnowDown_BrowserExtension_0.1.13.zip` 并完整解压。在 `chrome://extensions` 或 `edge://extensions` 开启开发者模式，加载包含 `manifest.json` 的文件夹。固定工具栏 SnowDown 图标。更新已有插件时覆盖原文件夹并刷新扩展，再刷新已有网页。
+独立使用：下载 `SnowDown_BrowserExtension_0.1.14.zip` 并完整解压。在 `chrome://extensions` 或 `edge://extensions` 开启开发者模式，加载包含 `manifest.json` 的文件夹。固定工具栏 SnowDown 图标。更新已有插件时覆盖原文件夹并刷新扩展，再刷新已有网页。
 
 普通 Windows 用户不能由软件静默安装未上架的扩展。当前未上架扩展商店，最后的浏览器加载确认需用户完成；不设置企业强制安装策略，不修改用户浏览器的 Preferences 或 Secure Preferences。官方说明：[Chrome](https://developer.chrome.com/docs/extensions/how-to/distribute/install-extensions)、[Edge](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-manage-extensions-webstore)。
 
