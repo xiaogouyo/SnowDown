@@ -1,9 +1,9 @@
 import type { Platform, SourceLink } from './types'
 import sites from '../shared/platforms.json'
 
-export const platformLabels: Record<Platform, string> = { bilibili: 'B站', douyin: '抖音', xiaohongshu: '小红书', web: '网页视频' }
-export const supportedSiteCount = sites.length
-export const supportedSiteNames = sites.map(site => site.label).join('、')
+export const platformLabels: Record<Platform, string> = { bilibili: 'B站', douyin: '抖音', xiaohongshu: '小红书', channels: '视频号', web: '网页视频' }
+export const supportedSiteCount = sites.length + 1
+export const supportedSiteNames = ['视频号', ...sites.map(site => site.label)].join('、')
 const matches = (host: string, base: string) => host === base || host.endsWith(`.${base}`)
 export function sourceLabel(source: {platform: Platform; url?: string; sourceUrl?: string}): string {
   if(source.platform !== 'web') return platformLabels[source.platform]
@@ -25,6 +25,15 @@ export function identifySource(text: string): SourceLink | null {
         if (!id) continue
         const page = Number(url.searchParams.get('p'))
         return { platform: 'bilibili', url: `https://www.bilibili.com/video/${id}${page > 1 ? `?p=${page}` : ''}` }
+      }
+      if (host === 'weixin.qq.com' || host === 'channels.weixin.qq.com') {
+        const id = host === 'weixin.qq.com' ? url.pathname.match(/^\/sph\/([A-Za-z0-9_-]{6,64})\/?$/)?.[1] : url.pathname === '/finder-preview/pages/sph' ? url.searchParams.get('id') : null
+        if (id && /^[A-Za-z0-9_-]{6,64}$/.test(id)) return {platform:'channels',url:'https://weixin.qq.com/sph/'+id}
+        if (host === 'channels.weixin.qq.com' && url.pathname === '/finder-preview/pages/feed') {
+          const eid=url.searchParams.get('eid'), token=url.searchParams.get('token')
+          if (eid && eid.length<=4096 && (!token || token.length<=8192)) {const canonical=new URL('https://channels.weixin.qq.com/finder-preview/pages/feed');canonical.searchParams.set('eid',eid);if(token)canonical.searchParams.set('token',token);return {platform:'channels',url:canonical.toString()}}
+        }
+        continue
       }
       if (matches(host, 'douyin.com') || matches(host, 'iesdouyin.com')) {
         if (host === 'v.douyin.com') return { platform: 'douyin', url: url.toString() }

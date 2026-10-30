@@ -1,15 +1,17 @@
 # SnowDown
 
-Windows 桌面视频下载工具与 Chrome / Edge 插件，共用 50 类平台目录。支持原三平台专用解析、更多站点通用提取器和浏览器媒体读取；实际范围见[平台说明](docs/platform-support.md)。
+Windows 桌面视频下载工具与 Chrome / Edge 插件，共用 50 类平台目录；桌面另提供视频号专用解析入口。支持原三平台专用解析、更多站点通用提取器和浏览器媒体读取；实际范围见[平台说明](docs/platform-support.md)。
 
-## 下载 v0.2.15 / 插件 v0.1.15
+## 下载 v0.2.16 / 插件 v0.1.17
 
-- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.15/SnowDown_0.2.15_x64-setup.exe)
-- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.15/SnowDown_0.2.15_Windows_x64_portable.zip)
-- [独立浏览器插件 v0.1.15](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.15/SnowDown_BrowserExtension_0.1.15.zip)
-- [发布说明与校验记录](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.15)
+- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.16/SnowDown_0.2.16_x64-setup.exe)
+- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.16/SnowDown_0.2.16_Windows_x64_portable.zip)
+- [独立浏览器插件 v0.1.17](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.17/SnowDown_BrowserExtension_0.1.17.zip)
+- [发布说明与校验记录](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.16)
 
-桌面 v0.2.15 与插件 v0.1.15 新增网页资源分类、网格预览、尺寸与格式筛选、全选/反选及 ZIP 打包。浏览器可独立生成 ZIP，也可将打包任务交给新版桌面。原登录、设置及下载内容继续沿用。
+桌面 v0.2.16 新增视频号分享链接解析和下载：在设置 → 平台账号 → 视频号中打开腾讯元宝官方页面，由用户完成登录并保存解析会话，再粘贴视频号链接解析。会话仅在本机加密保存，与其他平台独立；详情见[隐私政策](PRIVACY.md)。
+
+视频号首批支持官方接口返回的普通可播放视频、MP4/M4A 输出和封面。画质以实际响应为准；源站不支持分段时使用单连接，恢复任务可能重新传输。插件继续使用 v0.1.17，支持网页资源分类、网格预览、筛选、全选/反选及浏览器或桌面 ZIP 打包。原有登录、设置及下载内容继续沿用。
 
 插件新增短期解析缓存与双 Worker，重复请求合并、过期和页面变化自动失效；滚动时延后卡片发现，后台下载不抢当前网页焦点。安装或更新插件后请刷新扩展及已有网页。
 

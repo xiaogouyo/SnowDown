@@ -4,7 +4,7 @@
 维护者 / Maintainer：[xiaogouyo](https://github.com/xiaogouyo)  
 项目 / Project：[SnowDown](https://github.com/xiaogouyo/SnowDown)
 
-本政策适用于 SnowDown 浏览器扩展，包括 Chrome 商店上传版 v0.1.17，以及扩展与本机 SnowDown Windows 桌面端之间的账号同步和下载联动。界面语言不同不改变数据处理方式。后续版本如改变处理方式，将更新本政策。
+本政策适用于 SnowDown 浏览器扩展（包括 Chrome 商店上传版 v0.1.17）、本机 SnowDown Windows 桌面端 v0.2.16 的视频号解析会话，以及扩展与桌面端之间的账号同步和下载联动。界面语言不同不改变数据处理方式。后续版本如改变处理方式，将更新本政策。
 
 ## 1. 用途与处理原则
 
@@ -27,6 +27,12 @@ SnowDown 帮助用户识别、筛选、预览和保存网页中的视频、音�
 **v0.1.17 的账号同步开关默认开启。发现新的桌面绑定时，当前实现也会开启桌面转发与账号同步。桌面端连接且同步开启时，可能自动同步支持平台的登录状态，并在 Cookie 变化后再次同步。**
 
 用户可在插件“偏好设置”中关闭“连接后同步三平台账号”。关闭后停止后续自动同步；这不会自动删除此前已经保存在桌面端的登录信息。要移除桌面端已保存的会话，请同时在桌面端的平台账号设置中退出对应账号。卸载扩展也不等于删除桌面端会话。
+
+### 视频号解析会话（桌面 v0.2.16）
+
+桌面端可在用户点击入口后打开腾讯元宝官方页面，由用户自行完成登录。用户点击保存会话后，软件读取这个独立官方窗口中的腾讯元宝 Cookie，并在本机使用 Windows DPAPI 加密保存；不会读取现有 Chrome、Edge 或微信客户端的 Cookie、账号数据库或密码。该解析会话与浏览器扩展同步的三个平台账号分开管理。
+
+用户提交视频号链接并解析时，链接和必要的腾讯元宝会话凭据会通过 HTTPS 发送到腾讯元宝官方解析接口；取得的视频号访问参数再发送到视频号官方媒体接口，以获取可用资源。相关腾讯服务将收到这些请求。用户可在“平台账号 → 视频号”中检查或退出该解析会话；退出会清除软件保存的该 Cookie 并清理对应内置官方页面的会话数据。该入口需要用户操作，不会从用户浏览器自动导入腾讯元宝登录状态。
 
 ## 4. 信息在哪里处理和传输
 
@@ -77,5 +83,7 @@ SnowDown 帮助用户识别、筛选、预览和保存网页中的视频、音�
 SnowDown processes permitted website URLs, titles, media/resource metadata, selected downloads, preferences, and local connection/task information to identify and save website resources. While desktop account synchronization is enabled and the local desktop application is connected, it reads cookies for Bilibili, Douyin, and Xiaohongshu and may read account nicknames and avatars. These are transferred to the user's own desktop application using Native Messaging. In v0.1.17, synchronization is enabled by default, and a new desktop binding enables desktop forwarding and account synchronization. Disable synchronization in extension settings to stop future synchronization; sign out separately in desktop account settings to remove previously saved desktop sessions.
 
 The extension does not operate a developer cloud collection service, use advertising/analytics SDKs, sell personal data, or use data for unrelated advertising or credit assessments. Website/CDN requests necessarily disclose ordinary network/request information to the target service. Some user-selected resources can use HTTP. Settings are stored locally, parse caches are primarily in memory, download jobs use session storage and temporary local files, and saved downloads remain on the device. The Windows companion encrypts saved platform cookies using DPAPI. Uninstalling the extension does not remove desktop sessions or downloaded files.
+
+Desktop v0.2.16 additionally supports an explicitly initiated Tencent Yuanbao login in an isolated official window for Channels share-link parsing. Saving this session stores its cookies locally with Windows DPAPI. Submitted Channels links and the necessary Yuanbao credentials are sent over HTTPS to Tencent official parsing services; returned access parameters are sent to Channels official media services. This session is managed separately and can be removed in desktop Channels account settings. Existing browser or WeChat-client account databases are not read.
 
 Users can revoke site permissions, disable features, clear extension data and download records, sign out of desktop platform accounts, or uninstall the extension. The extension's executable code is packaged locally. Our use and transfer of information follow the Chrome Web Store User Data Policy, including its Limited Use requirements. For questions, contact the maintainer through the public project Issues page without submitting cookies, tokens, passwords, or other sensitive details. The Chinese sections above provide the full policy.

@@ -1,0 +1,10 @@
+import {describe,it,expect,vi} from 'vitest'
+import {mount,flushPromises} from '@vue/test-utils'
+import ChannelsAccount from '../src/components/ChannelsAccount.vue'
+import {identifySource,sourceLabel,identifySources} from '../src/sources'
+const account=vi.hoisted(()=>vi.fn())
+vi.mock('../src/api',()=>({channelsAccount:account}))
+describe('Channels desktop integration',()=>{
+ it('normalizes share messages and rejects lookalike hosts and invalid routes',()=>{expect(identifySource('分享 https://weixin.qq.com/sph/ABC12345?from=share')).toEqual({platform:'channels',url:'https://weixin.qq.com/sph/ABC12345'});expect(identifySource('https://channels.weixin.qq.com/finder-preview/pages/sph?id=ABC12345')).toEqual({platform:'channels',url:'https://weixin.qq.com/sph/ABC12345'});expect(identifySources('https://weixin.qq.com/sph/ABC12345 https://channels.weixin.qq.com/finder-preview/pages/sph?id=ABC12345').duplicates).toBe(1);expect(sourceLabel({platform:'channels'})).toBe('视频号');for(const u of ['https://weixin.qq.com.evil.test/sph/ABC12345','https://user@weixin.qq.com/sph/ABC12345','https://weixin.qq.com:8443/sph/ABC12345','https://weixin.qq.com/sph/abc/def','https://weixin.qq.com/other'])expect(identifySource(u)).toBeNull()})
+ it('labels Tencent official login and checks a saved session against the input video',async()=>{account.mockReset();account.mockResolvedValue({saved:false,state:'loggedout',message:'请登录'});const w=mount(ChannelsAccount,{props:{input:'https://weixin.qq.com/sph/ABC12345'}});await flushPromises();expect(w.text()).toContain('腾讯元宝官方');await w.findAll('button')[0].trigger('click');await flushPromises();expect(account).toHaveBeenCalledWith('open','https://weixin.qq.com/sph/ABC12345');account.mockResolvedValue({saved:true,state:'unknown',message:'只有预览信息'});await w.findAll('button')[1].trigger('click');await flushPromises();expect(account).toHaveBeenCalledWith('save','https://weixin.qq.com/sph/ABC12345');expect(account).toHaveBeenCalledWith('check','https://weixin.qq.com/sph/ABC12345');expect(w.text()).toContain('只有预览信息');expect(w.text()).not.toContain('登录成功')})
+})

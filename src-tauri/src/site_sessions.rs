@@ -563,7 +563,9 @@ impl Sessions {
         let index = match source.platform {
             Platform::Douyin => 0,
             Platform::Xiaohongshu => 1,
-            Platform::Bilibili | Platform::Web => return Err("此平台使用专用解析器。".into()),
+            Platform::Bilibili | Platform::Web | Platform::Channels => {
+                return Err("此平台使用专用解析器。".into())
+            }
         };
         // A single page per platform shares its login profile. Serialize page
         // navigation so concurrent queue items cannot replace each other's source.

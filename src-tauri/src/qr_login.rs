@@ -129,7 +129,7 @@ fn has_account_cookie(platform: Platform, cookie: &str) -> bool {
                 && match platform {
                     Platform::Douyin => matches!(name, "sessionid" | "sessionid_ss"),
                     Platform::Xiaohongshu => matches!(name, "web_session" | "web_session_ssl"),
-                    Platform::Bilibili | Platform::Web => false,
+                    Platform::Bilibili | Platform::Web | Platform::Channels => false,
                 }
         })
 }

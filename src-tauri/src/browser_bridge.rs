@@ -460,6 +460,7 @@ async fn dispatch(app: &AppHandle, state: &AppState, request: &Value) -> Result<
             for session in sessions {
                 let platform: Platform = serde_json::from_value(session["platform"].clone())
                     .map_err(|_| "平台无效。")?;
+                if platform == Platform::Channels { return Err("视频号解析会话需在桌面端的官方页面登录，不接受浏览器账号同步。".into()); }
                 let cookie = session["cookie"].as_str().unwrap_or_default().to_string();
                 if cookie.is_empty() {
                     continue;

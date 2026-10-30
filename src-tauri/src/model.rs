@@ -15,6 +15,7 @@ pub enum Platform {
     Bilibili,
     Douyin,
     Xiaohongshu,
+    Channels,
     Web,
 }
 
@@ -24,6 +25,7 @@ impl Platform {
             Self::Bilibili => "bilibili",
             Self::Douyin => "douyin",
             Self::Xiaohongshu => "xiaohongshu",
+            Self::Channels => "channels",
             Self::Web => "web",
         }
     }
@@ -32,6 +34,7 @@ impl Platform {
             Self::Bilibili => "B站",
             Self::Douyin => "抖音",
             Self::Xiaohongshu => "小红书",
+            Self::Channels => "视频号",
             Self::Web => "网页视频",
         }
     }
@@ -40,6 +43,7 @@ impl Platform {
             Self::Bilibili => "https://www.bilibili.com/",
             Self::Douyin => "https://www.douyin.com/",
             Self::Xiaohongshu => "https://www.xiaohongshu.com/",
+            Self::Channels => "https://channels.weixin.qq.com/",
             Self::Web => "https://www.youtube.com/",
         }
     }

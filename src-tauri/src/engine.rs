@@ -231,10 +231,14 @@ async fn run_task(
         if source.platform != task.platform {
             return Err("下载任务的平台与来源不一致。".into());
         }
-        let resolved = state
-            .site_sessions
-            .resolve(app, &source, task.quality)
-            .await?;
+        let resolved = if source.platform == Platform::Channels {
+            state.channels.resolve(&source, task.quality).await?
+        } else {
+            state
+                .site_sessions
+                .resolve(app, &source, task.quality)
+                .await?
+        };
         check_cancel(cancel)?;
         let label = resolved
             .info
@@ -436,6 +440,11 @@ async fn run_task(
     ]);
     run_ffmpeg(ffmpeg, &args, cancel).await?;
     check_cancel(cancel)?;
+    let mut warnings = if task.platform == Platform::Channels {
+        validate_channels_output(ffmpeg, &pending, &task.format, cancel).await?
+    } else {
+        vec![]
+    };
     fs::rename(&pending, &output)
         .await
         .map_err(|e| format!("保存视频失败：{e}"))?;
@@ -446,7 +455,6 @@ async fn run_task(
         t.error = None;
         t.output_path = Some(output.to_string_lossy().to_string());
     })?;
-    let mut warnings = vec![];
     if task.save_cover && !task.cover.is_empty() {
         let cover_path = directory.join(format!("{stem}.jpg"));
         match media_client.get(&task.cover).send().await {
@@ -526,7 +534,61 @@ async fn wait_cancel(cancel: &AtomicBool) {
     }
 }
 
-pub async fn run_ffmpeg(binary: &Path, args: &[String], cancel: &AtomicBool) -> Result<(), String> {
+pub async fn validate_channels_output(
+    ffmpeg: &Path,
+    output: &Path,
+    format: &OutputFormat,
+    cancel: &AtomicBool,
+) -> Result<Vec<String>, String> {
+    let probe = ffmpeg.with_file_name("ffprobe.exe");
+    if !probe.is_file() {
+        return Err("缺少视频完整性检查组件，请安装完整客户端。".into());
+    }
+    let mut command = Command::new(probe);
+    command
+        .kill_on_drop(true)
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration:stream=codec_type",
+            "-of",
+            "json",
+        ])
+        .arg(output);
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    let operation = tokio::time::timeout(Duration::from_secs(20), command.output());
+    tokio::pin!(operation);
+    let result = loop {
+        tokio::select! {result=&mut operation=>break result.map_err(|_|"视频完整性检查超时。")?.map_err(|_|"无法运行视频完整性检查。")?,_ = tokio::time::sleep(Duration::from_millis(100))=>check_cancel(cancel)?}
+    };
+    if !result.status.success() || result.stdout.len() > 65536 {
+        return Err("下载文件未通过媒体完整性检查，请重新解析后重试。".into());
+    }
+    let info: Value = serde_json::from_slice(&result.stdout).map_err(|_| "媒体检查结果无效。")?;
+    let duration = info["format"]["duration"]
+        .as_str()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let streams = info["streams"].as_array().ok_or("未找到有效音视频轨道。")?;
+    let audio = streams.iter().any(|s| s["codec_type"] == "audio");
+    let video = streams.iter().any(|s| s["codec_type"] == "video");
+    if !duration.is_finite()
+        || duration <= 0.0
+        || (format == &OutputFormat::Video && !video)
+        || (format == &OutputFormat::Audio && !audio)
+    {
+        return Err("下载文件的时长或媒体轨道无效，请重新解析后重试。".into());
+    }
+    Ok(if format == &OutputFormat::Video && !audio {
+        vec!["此视频没有音频轨道，请确认源视频是否为无声内容。".into()]
+    } else {
+        vec![]
+    })
+}
+
+async fn run_ffmpeg(binary: &Path, args: &[String], cancel: &AtomicBool) -> Result<(), String> {
     let mut command = Command::new(binary);
     command
         .args(args)
@@ -609,6 +671,26 @@ mod tests {
         let streams = metadata["streams"].as_array().unwrap();
         assert!(streams.iter().any(|s| s["codec_type"] == "video"));
         assert!(streams.iter().any(|s| s["codec_type"] == "audio"));
+        let checked = validate_channels_output(
+            &resources.join("ffmpeg.exe"),
+            &output,
+            &OutputFormat::Video,
+            &AtomicBool::new(false),
+        )
+        .await
+        .unwrap();
+        assert!(checked.is_empty());
+        let broken = output.with_extension("broken.mp4");
+        fs::write(&broken, b"not a video").await.unwrap();
+        assert!(validate_channels_output(
+            &resources.join("ffmpeg.exe"),
+            &broken,
+            &OutputFormat::Video,
+            &AtomicBool::new(false)
+        )
+        .await
+        .is_err());
+        let _ = fs::remove_file(broken).await;
         let _ = fs::remove_file(output).await;
     }
 

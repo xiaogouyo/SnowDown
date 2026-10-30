@@ -1,6 +1,6 @@
 export type TaskStatus = 'queued' | 'downloading' | 'merging' | 'paused' | 'completed' | 'failed' | 'cancelled'
 export type OutputFormat = 'video' | 'audio'
-export type Platform = 'bilibili' | 'douyin' | 'xiaohongshu' | 'web'
+export type Platform = 'bilibili' | 'douyin' | 'xiaohongshu' | 'channels' | 'web'
 export interface SourceLink { platform: Platform; url: string }
 
 export interface Settings {

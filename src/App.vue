@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ChannelsAccount from './components/ChannelsAccount.vue'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   ArrowDown, ArrowDownToLine, ArrowUpRight, Check, CheckCheck, ChevronDown, CircleAlert,
@@ -64,7 +65,7 @@ let disposed = false
 let unwatchFocus: (() => void) | undefined
 let checkingClipboard = false
 const detectedSource = computed(() => identifySource(link.value))
-const platformList: Platform[] = ['bilibili', 'douyin', 'xiaohongshu']
+const platformList: Platform[] = ['bilibili', 'douyin', 'xiaohongshu', 'channels']
 const filterOptions = [{ value: 'all', label: '全部状态' }, { value: 'downloading', label: '进行中' }, { value: 'paused', label: '已暂停' }, { value: 'failed', label: '失败' }]
 const connectionOptions = [1, 2, 4, 8, 16].map(value => ({ value, label: `${value} 个连接${value === 8 ? "（推荐）" : ""}` }))
 const concurrencyOptions = [1, 2, 3, 4].map(value => ({ value, label: `${value} 个任务` }))
@@ -269,6 +270,7 @@ async function openSourceLogin() {
   if (!source || source.platform === 'bilibili' || source.platform === 'web') return
   openSettings('account')
   accountPlatform.value = source.platform
+  if(source.platform==='channels'){try{await api.channelsAccount('open',source.url)}catch(error){notify(errorMessage(error),'error')}return}
   await startLogin()
 }
 
@@ -503,7 +505,7 @@ onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); u
             <button class="paste-button" type="button" title="读取剪贴板并解析 · Ctrl+Shift+V" :disabled="analyzing" @click="paste"><ClipboardPaste :size="15" /><span>粘贴并解析</span></button>
             <button class="button primary analyze-button" type="submit" :disabled="analyzing"><LoaderCircle v-if="analyzing" :size="16" class="spin" /><Download v-else :size="16" />{{ analyzing ? '正在解析' : '解析视频' }}</button>
           </form>
-          <div class="link-card-footer"><span v-if="detectedSource" class="recognized-source"><CircleCheck :size="13" />已识别{{ sourceLabel(detectedSource) }}<small>{{ sourceSummary(detectedSource) }}</small></span><span v-else><Check :size="13" />自动识别平台 · 支持分享短链接</span><button v-if="detectedSource && ['douyin','xiaohongshu'].includes(detectedSource.platform)" class="text-button" @click="openSourceLogin">登录{{ sourceLabel(detectedSource) }}</button><span class="shortcut-tip"><kbd>Ctrl Shift V</kbd> 粘贴并解析 · <kbd>Enter</kbd> 解析</span></div>
+          <div class="link-card-footer"><span v-if="detectedSource" class="recognized-source"><CircleCheck :size="13" />已识别{{ sourceLabel(detectedSource) }}<small>{{ sourceSummary(detectedSource) }}</small></span><span v-else><Check :size="13" />自动识别平台 · 支持分享短链接</span><button v-if="detectedSource && ['douyin','xiaohongshu','channels'].includes(detectedSource.platform)" class="text-button" @click="openSourceLogin">登录{{ sourceLabel(detectedSource) }}</button><span class="shortcut-tip"><kbd>Ctrl Shift V</kbd> 粘贴并解析 · <kbd>Enter</kbd> 解析</span></div>
           <div v-if="clipboardSuggestion" class="clipboard-suggestion"><LoaderCircle v-if="pendingClipboard?.phase === 'parsing'" :size="15" class="spin" /><ClipboardPaste v-else :size="15" /><span>剪贴板识别到{{ sourceLabel(clipboardSuggestion) }}链接 · {{ clipboardMessage }}</span><button class="text-button" :disabled="pendingClipboard?.phase === 'parsing'" @click="parseClipboardSuggestion">{{ pendingClipboard?.phase === 'ready' ? '查看结果' : pendingClipboard?.phase === 'error' ? '重试解析' : '立即解析' }}<ArrowUpRight :size="13" /></button><button class="icon-button" aria-label="忽略剪贴板链接" @click="discardClipboard"><X :size="14" /></button></div>
         </section>
 
@@ -604,7 +606,8 @@ onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); u
         </div>
         <div v-else class="settings-content account-content">
           <div class="account-platform-tabs"><button v-for="platform in platformList" :key="platform" :class="{ active: accountPlatform === platform }" @click="accountPlatform = platform">{{ platformLabels[platform] }}</button></div>
-          <template v-if="accountPlatform === 'bilibili' && snapshot?.authenticated && !loginQr && loginState === 'idle'">
+          <ChannelsAccount v-if="accountPlatform === 'channels'" :input="detectedSource?.platform === 'channels' ? detectedSource.url : undefined"/>
+          <template v-else-if="accountPlatform === 'bilibili' && snapshot?.authenticated && !loginQr && loginState === 'idle'">
             <div class="account-illustration account-avatar"><img v-if="snapshot.auth.account?.avatar" :src="snapshot.auth.account.avatar" alt="B站头像" referrerpolicy="no-referrer" /><UserRound v-else :size="25" /></div>
             <h3>{{ snapshot.auth.account?.name || 'B站账号' }}</h3>
             <span class="login-saved"><ShieldCheck :size="14" />登录状态已加密保存</span>
@@ -633,7 +636,7 @@ onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); u
             <p class="qr-status" role="status">{{ loginState === 'loading' ? '正在获取官方二维码…' : loginState === 'waiting' ? '请用手机' + platformLabels[accountPlatform] + '扫码 · 过期自动更新' : loginState === 'scanned' ? '已扫码，请在手机' + platformLabels[accountPlatform] + '确认登录' : loginState === 'error' ? loginError : '确认登录后，将自动保存登录状态' }}</p>
             <button v-if="loginState === 'idle'" class="button primary login-start" @click="startLogin"><QrCode :size="16" />获取登录二维码</button>
           </template>
-          <div class="login-privacy"><ShieldCheck :size="16" /><span>二维码来自平台官方登录流程，过期后自动更新。登录状态由 Windows 加密保存，仅供当前系统用户使用。登录与视频解析相互独立。</span></div>
+          <div v-if="accountPlatform !== 'channels'" class="login-privacy"><ShieldCheck :size="16" /><span>二维码来自平台官方登录流程，过期后自动更新。登录状态由 Windows 加密保存，仅供当前系统用户使用。登录与视频解析相互独立。</span></div>
         </div>
         <div v-if="settingsTab === 'download'" class="modal-footer"><span>设置适用于之后创建的新任务</span><button class="button primary" :disabled="savingSettings" @click="saveSettings"><Check :size="16" />保存设置</button></div>
       </section>

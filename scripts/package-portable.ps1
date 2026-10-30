@@ -14,14 +14,18 @@ foreach ($taskFile in @('ffmpeg.exe', 'ffprobe.exe', 'yt-dlp.exe', 'deno.exe', '
 }
 Copy-Item -LiteralPath (Join-Path $taskRoot 'src-tauri\resources\browser-extension') -Destination $taskResources -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $taskRoot 'THIRD_PARTY.md') -Destination (Join-Path $taskPortable 'THIRD_PARTY.md')
+Copy-Item -LiteralPath (Join-Path $taskRoot 'PRIVACY.md') -Destination (Join-Path $taskPortable 'PRIVACY.md')
 @"
 SnowDown Windows $taskVersion
 
 使用 Windows 10/11 x64，系统需要 WebView2 运行时。
 解压整个文件夹，双击 SnowDown.exe；请保留 resources 文件夹。
 
-粘贴B站、抖音、小红书或共享目录中的其他平台链接 → 解析视频 → 选择画质和格式 → 下载。
+粘贴B站、抖音、小红书、视频号或共享目录中的其他平台链接 → 解析视频 → 选择画质和格式 → 下载。
 新增站点以公开页面或浏览器当前已加载媒体为基础，部分内容需登录或可能受平台限制。
+视频号：设置 → 平台账号 → 视频号 → 打开腾讯元宝官方登录；完成后返回保存会话。再粘贴视频号分享链接解析下载。
+视频号解析会话单独管理，仅在本机加密保存，不读取外部浏览器或微信账号数据库；可在对应账号页检查或退出。
+视频号首批支持官方接口返回的普通可播放视频；画质仅展示实际取得的选项。源站不支持分段时自动使用单连接，重新继续任务时可能需要从头传输。
 插件偏好设置中开启“启用更多平台与预览下载”，确认权限并刷新网页，可使用预览卡片下载菜单。
 点击“批量下载”或 Ctrl+N，可混合粘贴多个平台链接，用换行、空格或逗号分隔。
 统一设置格式、画质、保存目录、附件、分P范围和任务启动间隔后，一键加入下载队列。
@@ -82,7 +86,24 @@ if (Test-Path -LiteralPath $taskInstallerDir) {
 }
 $taskExtensionName="SnowDown_BrowserExtension_$taskExtensionVersion.zip"
 $taskExtensionPackage=Join-Path $taskRelease $taskExtensionName
-Compress-Archive -Path (Join-Path $taskRoot 'src-tauri\resources\browser-extension\*') -DestinationPath $taskExtensionPackage -CompressionLevel Optimal -Force
+if (Test-Path -LiteralPath $taskExtensionPackage) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $taskExtensionSource=Join-Path $taskRoot 'src-tauri/resources/browser-extension'
+    $taskPublicFiles=@(Get-ChildItem -LiteralPath $taskExtensionSource -Recurse -File | ForEach-Object { $_.FullName.Substring($taskExtensionSource.Length+1).Replace('\','/') })
+    $taskExistingZip=[IO.Compression.ZipFile]::OpenRead($taskExtensionPackage)
+    try {
+        $taskEntries=@($taskExistingZip.Entries | Where-Object { $_.Name })
+        if (@(Compare-Object $taskPublicFiles @($taskEntries | ForEach-Object { $_.FullName.Replace('\','/') })).Count) { throw 'Existing extension ZIP differs; publish a new extension version instead of replacing it.' }
+        foreach($taskEntry in $taskEntries) {
+            $taskRelative=$taskEntry.FullName.Replace('\','/')
+            $taskStream=$taskEntry.Open();$taskHasher=[Security.Cryptography.SHA256]::Create()
+            try { $taskEntryHash=[BitConverter]::ToString($taskHasher.ComputeHash($taskStream)).Replace('-','') } finally { $taskStream.Dispose();$taskHasher.Dispose() }
+            if($taskEntryHash -ne (Get-FileHash -LiteralPath (Join-Path $taskExtensionSource $taskRelative) -Algorithm SHA256).Hash) { throw 'Existing extension ZIP contents differ; increment its version before packaging.' }
+        }
+    } finally { $taskExistingZip.Dispose() }
+} else {
+    Compress-Archive -Path (Join-Path $taskRoot 'src-tauri\resources\browser-extension\*') -DestinationPath $taskExtensionPackage -CompressionLevel Optimal
+}
 Get-ChildItem -LiteralPath $taskRelease -File | Where-Object { ($_.Name -like "SnowDown_$($taskVersion)_*" -or $_.Name -eq $taskExtensionName) -and $_.Extension -in @('.zip', '.exe') } | ForEach-Object {
     $taskHash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower()
     "$taskHash  $($_.Name)"

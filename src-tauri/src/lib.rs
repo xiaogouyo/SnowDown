@@ -5,6 +5,7 @@ mod batch;
 mod batch_probe;
 mod bilibili;
 mod browser_bridge;
+mod channels;
 mod clipboard;
 #[cfg(debug_assertions)]
 mod clipboard_probe;
@@ -13,9 +14,9 @@ mod clipboard_watch;
 mod debug_probe;
 mod engine;
 mod extension_package;
-mod extension_update;
 #[cfg(all(debug_assertions, windows))]
 mod extension_package_probe;
+mod extension_update;
 mod extractor_proxy;
 #[cfg(all(debug_assertions, windows))]
 mod login_check_probe;
@@ -26,8 +27,8 @@ mod mode_morph_probe;
 mod model;
 mod notifications;
 mod qr_login;
-mod resource_download;
 mod resource_archive;
+mod resource_download;
 mod site_sessions;
 mod sites;
 mod storage;
@@ -61,6 +62,7 @@ pub struct AppState {
     settings: Mutex<Settings>,
     auth: auth::Auth,
     site_sessions: site_sessions::Sessions,
+    channels: channels::Channels,
     qr_login: qr_login::QrLogin,
     active: Mutex<HashMap<String, Arc<AtomicBool>>>,
     storage: Storage,
@@ -195,11 +197,26 @@ fn browser_status(state: State<'_, Arc<AppState>>) -> Vec<browser_bridge::Browse
     browser_bridge::snapshot(&state)
 }
 #[tauri::command]
-async fn check_browser_extension_update()->Result<extension_update::Release,String>{extension_update::check().await}
+async fn check_browser_extension_update() -> Result<extension_update::Release, String> {
+    extension_update::check().await
+}
 #[tauri::command]
-async fn download_browser_extension_update(path:String,version:String)->Result<String,String>{extension_update::download(&path,&version).await}
+async fn download_browser_extension_update(
+    path: String,
+    version: String,
+) -> Result<String, String> {
+    extension_update::download(&path, &version).await
+}
 #[tauri::command]
-fn open_browser_extension_release(app:AppHandle,url:String)->Result<(),String>{use tauri_plugin_opener::OpenerExt;if !extension_update::release_url(&url){return Err("插件发布页面无效。".into())}app.opener().open_url(url,None::<&str>).map_err(|_|"无法打开插件发布页面。".into())}
+fn open_browser_extension_release(app: AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    if !extension_update::release_url(&url) {
+        return Err("插件发布页面无效。".into());
+    }
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|_| "无法打开插件发布页面。".into())
+}
 #[tauri::command]
 fn install_browser_extension(app: AppHandle, browser: String) -> Result<String, String> {
     browser_bridge::install(&app, &browser)
@@ -359,7 +376,9 @@ async fn inspect_source(
     state: &AppState,
     source: &sites::Source,
 ) -> Result<VideoInfo, String> {
-    if source.platform == Platform::Web {
+    if source.platform == Platform::Channels {
+        state.channels.resolve(source, 0).await.map(|v| v.info)
+    } else if source.platform == Platform::Web {
         state.extractor.inspect(app, source).await
     } else if source.platform == Platform::Bilibili {
         bilibili::inspect(&source.url, &state.auth.cookie()).await
@@ -539,12 +558,35 @@ fn save_settings(
 }
 
 #[tauri::command]
+async fn channels_account(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    action: String,
+    input: Option<String>,
+) -> Result<channels::Status, String> {
+    match action.as_str() {
+        "status" => Ok(state.channels.status()),
+        "open" => {
+            channels::open_login(&app, true)?;
+            Ok(state.channels.status())
+        }
+        "save" => state.channels.save(&app, input.as_deref()).await,
+        "check" => state.channels.check(input.as_deref()).await,
+        "logout" => state.channels.logout(&app).await,
+        _ => Err("未知的视频号账号操作。".into()),
+    }
+}
+
+#[tauri::command]
 async fn begin_login(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
     platform: Option<Platform>,
 ) -> Result<qr_login::LoginQr, String> {
     let platform = platform.unwrap_or_default();
+    if platform == Platform::Channels {
+        return Err("视频号请使用腾讯元宝官方登录入口。".into());
+    }
     let result = if platform == Platform::Bilibili {
         state.auth.begin().await.map(Into::into)
     } else {
@@ -562,6 +604,9 @@ async fn poll_login(
     platform: Option<Platform>,
 ) -> Result<qr_login::LoginPoll, String> {
     let platform = platform.unwrap_or_default();
+    if platform == Platform::Channels {
+        return Err("视频号请使用腾讯元宝官方登录入口。".into());
+    }
     let result = if platform == Platform::Bilibili {
         qr_login::LoginPoll::state(state.auth.poll(&id).await?.state)
     } else {
@@ -576,6 +621,9 @@ async fn poll_login(
 #[tauri::command]
 fn cancel_login(app: AppHandle, state: State<'_, Arc<AppState>>, platform: Option<Platform>) {
     let platform = platform.unwrap_or_default();
+    if platform == Platform::Channels {
+        return;
+    }
     if platform == Platform::Bilibili {
         state.auth.cancel();
     } else {
@@ -638,9 +686,13 @@ fn open_download_directory(app: AppHandle, state: State<'_, Arc<AppState>>) -> R
 }
 
 #[tauri::command]
-fn autostart_status() -> Result<autostart::Status, String> { autostart::status() }
+fn autostart_status() -> Result<autostart::Status, String> {
+    autostart::status()
+}
 #[tauri::command]
-fn set_autostart(enabled: bool) -> Result<autostart::Status, String> { autostart::set(enabled) }
+fn set_autostart(enabled: bool) -> Result<autostart::Status, String> {
+    autostart::set(enabled)
+}
 
 fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -671,7 +723,9 @@ fn find_ffmpeg(app: &AppHandle) -> Option<PathBuf> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _| {
-            if !autostart::background(args) { show_main(app); }
+            if !autostart::background(args) {
+                show_main(app);
+            }
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -754,6 +808,7 @@ pub fn run() {
                 settings: Mutex::new(settings),
                 auth: auth::Auth::open(data_dir.join("bilibili-session.dat")),
                 site_sessions: site_sessions::Sessions::open(data_dir.join("site-sessions")),
+                channels: channels::Channels::open(data_dir.join("channels-yuanbao-session.dat")),
                 qr_login: qr_login::QrLogin::default(),
                 active: Mutex::new(HashMap::new()),
                 storage,
@@ -774,7 +829,8 @@ pub fn run() {
             tray_menu::create(&handle)?;
             update_notice::create(&handle)?;
             #[cfg(debug_assertions)]
-            let browser_test = std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some()
+            let browser_test = std::env::var_os("SNOWDOWN_CHANNELS_PREVIEW").is_some()
+                || std::env::var_os("SNOWDOWN_MINIMAL_VERIFY").is_some()
                 || std::env::var_os("SNOWDOWN_LOGIN_CHECK_VERIFY").is_some()
                 || std::env::var_os("SNOWDOWN_MODE_MORPH_VERIFY").is_some()
                 || std::env::var_os("SNOWDOWN_EXTENSION_EXPORT_VERIFY").is_some();
@@ -861,8 +917,10 @@ pub fn run() {
                 auth_state.auth.validate().await;
                 auth_state.emit(&auth_handle);
             });
-            autostart::reconcile();
-            if !autostart::background(std::env::args()) { show_main(&handle); }
+            if !browser_test { autostart::reconcile(); }
+            if !autostart::background(std::env::args()) {
+                show_main(&handle);
+            }
             engine::start_scheduler(handle, state);
             Ok(())
         })
@@ -892,6 +950,7 @@ pub fn run() {
             install_browser_extension,
             export_browser_extension_zip,
             open_update_release,
+            channels_account,
             inspect_video,
             create_tasks,
             create_batch_tasks,

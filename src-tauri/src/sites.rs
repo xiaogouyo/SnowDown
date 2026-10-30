@@ -61,6 +61,8 @@ pub fn source_host(host: &str) -> Option<Platform> {
         || host.ends_with(".xhslink.com")
     {
         Some(Platform::Xiaohongshu)
+    } else if matches!(host, "weixin.qq.com" | "channels.weixin.qq.com") {
+        Some(Platform::Channels)
     } else if catalog_site(host).is_some() {
         Some(Platform::Web)
     } else {
@@ -94,6 +96,12 @@ pub fn recognize(input: &str) -> Result<Source, String> {
         };
         url.set_fragment(None);
         let _ = url.set_scheme("https");
+        if platform == Platform::Channels {
+            return Ok(Source {
+                platform,
+                url: crate::channels::normalize(url.as_str())?,
+            });
+        }
         if platform == Platform::Bilibili {
             let (id, page) = bilibili::normalize_input(url.as_str())?;
             if id.starts_with("https://") {
@@ -281,7 +289,9 @@ pub async fn resolve(source: &Source, quality: u32, cookie: &str) -> Result<Reso
             let state = extract_state(&html, "window.__INITIAL_STATE__")?;
             parse_xhs(&state, &id)?
         }
-        Platform::Bilibili | Platform::Web => return Err("此平台使用专用解析器。".into()),
+        Platform::Bilibili | Platform::Web | Platform::Channels => {
+            return Err("此平台使用专用解析器。".into())
+        }
     };
     let mut resolved = build_resolved(&canonical, &id, metadata, quality)?;
     resolved.audio_url = audio_url;
@@ -342,6 +352,9 @@ fn build_resolved(
 }
 
 pub fn video_id(source: &Source) -> Result<String, String> {
+    if source.platform == Platform::Channels {
+        return crate::channels::video_id(&source.url);
+    }
     if source.platform == Platform::Web {
         use sha2::Digest;
         return Ok(format!("{:x}", sha2::Sha256::digest(source.url.as_bytes()))[..24].to_string());
@@ -560,6 +573,10 @@ fn parse_xhs(value: &Value, id: &str) -> Result<Metadata, String> {
 }
 
 pub fn media_url(platform: Platform, input: &str) -> Result<Url, String> {
+    if platform == Platform::Channels {
+        return crate::channels::media_url(input)
+            .and_then(|u| Url::parse(&u).map_err(|_| "视频号媒体地址无效。".into()));
+    }
     let url = Url::parse(input).map_err(|_| "媒体地址无效。")?;
     let host = url.host_str().ok_or("媒体地址缺少域名。")?;
     let allowed = match platform {
@@ -740,7 +757,10 @@ mod tests {
         assert_eq!(catalog().len(), 50);
         for site in catalog() {
             for host in &site.hosts {
-                assert_eq!(catalog_site(host).map(|s| s.id.as_str()), Some(site.id.as_str()));
+                assert_eq!(
+                    catalog_site(host).map(|s| s.id.as_str()),
+                    Some(site.id.as_str())
+                );
                 assert!(source_host(host).is_some(), "{}", host);
                 assert!(source_host(&format!("{host}.evil.test")).is_none());
             }
