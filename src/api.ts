@@ -113,7 +113,7 @@ export async function openBrowserExtensionRelease(url:string):Promise<void>{requ
 export async function installBrowserExtension(browser:string): Promise<string> { requireDesktop(); return invoke('install_browser_extension',{browser}) }
 export async function saveBrowserExtensionZip(): Promise<string | null> {
   requireDesktop()
-  const path = await save({ title: '保存插件 ZIP', defaultPath: 'SnowDown_BrowserExtension_0.1.14.zip', filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }] })
+  const path = await save({ title: '保存插件 ZIP', defaultPath: 'SnowDown_BrowserExtension_0.1.15.zip', filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }] })
   return path ? invoke('export_browser_extension_zip', { path }) : null
 }
 export async function openUpdateRelease(): Promise<void> { requireDesktop(); await invoke('open_update_release') }

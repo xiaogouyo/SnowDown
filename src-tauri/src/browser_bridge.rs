@@ -40,7 +40,7 @@ pub struct BrowserStatus {
 }
 fn extension_status(version: Option<&str>, revision: Option<&str>, bundled: &str) -> (bool,bool) {
     let outdated=version.and_then(|v|semver::Version::parse(v).ok()).zip(semver::Version::parse(bundled).ok()).is_some_and(|(installed,current)|installed<current);
-    (outdated,version.is_none() || version==Some(bundled)&&revision!=Some("desktop-0.2.14"))
+    (outdated,version.is_none() || version==Some(bundled)&&revision!=Some("desktop-0.2.15"))
 }
 #[cfg(test)]
 mod version_tests {
@@ -50,7 +50,7 @@ mod version_tests {
         assert_eq!(extension_status(Some("0.1.5"),None,"0.1.6"),(true,false));
         assert_eq!(extension_status(None,None,"0.1.6"),(false,true));
         assert_eq!(extension_status(Some("0.1.6"),None,"0.1.6"),(false,true));
-        assert_eq!(extension_status(Some("0.1.6"),Some("desktop-0.2.14"),"0.1.6"),(false,false));
+        assert_eq!(extension_status(Some("0.1.6"),Some("desktop-0.2.15"),"0.1.6"),(false,false));
         assert_eq!(extension_status(Some("0.1.7"),None,"0.1.6"),(false,false));
     }
 }
@@ -435,6 +435,11 @@ async fn dispatch(app: &AppHandle, state: &AppState, request: &Value) -> Result<
             Ok(
                 json!({"title":video.title,"cover":video.cover,"author":video.author,"duration":video.duration,"streams":video.qualities.iter().map(|q|json!({"quality":q.id,"label":q.label,"width":q.width,"height":q.height,"native":true})).collect::<Vec<_>>() }),
             )
+        }
+        Some("resource-archive") => {
+            let items:Vec<crate::model::ArchiveResource>=serde_json::from_value(request["items"].clone()).map_err(|_|"打包资源无效。")?;
+            crate::resource_archive::enqueue(app,state,items,request["name"].as_str().unwrap_or("网页资源"))?;
+            Ok(json!({"added":1}))
         }
         Some("resource") => {
             crate::resource_download::enqueue(

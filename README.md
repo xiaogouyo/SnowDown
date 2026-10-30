@@ -2,14 +2,14 @@
 
 Windows 桌面视频下载工具与 Chrome / Edge 插件，共用 50 类平台目录。支持原三平台专用解析、更多站点通用提取器和浏览器媒体读取；实际范围见[平台说明](docs/platform-support.md)。
 
-## 下载 v0.2.14 / 插件 v0.1.14
+## 下载 v0.2.15 / 插件 v0.1.15
 
-- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.14/SnowDown_0.2.14_x64-setup.exe)
-- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.14/SnowDown_0.2.14_Windows_x64_portable.zip)
-- [独立浏览器插件 v0.1.14](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.14/SnowDown_BrowserExtension_0.1.14.zip)
-- [发布说明与校验记录](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.14)
+- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.15/SnowDown_0.2.15_x64-setup.exe)
+- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.15/SnowDown_0.2.15_Windows_x64_portable.zip)
+- [独立浏览器插件 v0.1.15](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.15/SnowDown_BrowserExtension_0.1.15.zip)
+- [发布说明与校验记录](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.15)
 
-桌面 v0.2.14 与插件 v0.1.14 加快 YouTube 解析，优先直接音视频和官方播放器接口，减少重复网页与清单请求。快速路径失败自动回退。旧版桌面可正常检查更新，登录、设置和下载内容继续沿用。
+桌面 v0.2.15 与插件 v0.1.15 新增网页资源分类、网格预览、尺寸与格式筛选、全选/反选及 ZIP 打包。浏览器可独立生成 ZIP，也可将打包任务交给新版桌面。原登录、设置及下载内容继续沿用。
 
 插件新增短期解析缓存与双 Worker，重复请求合并、过期和页面变化自动失效；滚动时延后卡片发现，后台下载不抢当前网页焦点。安装或更新插件后请刷新扩展及已有网页。
 

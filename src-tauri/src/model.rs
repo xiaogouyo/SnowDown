@@ -172,6 +172,14 @@ pub struct DownloadTask {
 pub struct ResourceSpec {
     pub url: String,
     pub extension: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub archive: Vec<ArchiveResource>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ArchiveResource {
+    pub url: String,
+    pub name: String,
 }
 
 #[derive(Clone, Serialize)]

@@ -27,6 +27,7 @@ mod model;
 mod notifications;
 mod qr_login;
 mod resource_download;
+mod resource_archive;
 mod site_sessions;
 mod sites;
 mod storage;

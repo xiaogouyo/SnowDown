@@ -14,7 +14,7 @@ describe('ZIP save dialog adapter',()=>{
     const path="D:\\本地 插件 ' $目录\\插件.zip"
     native.save.mockResolvedValue(path);native.invoke.mockResolvedValue(path)
     expect(await saveBrowserExtensionZip()).toBe(path)
-    expect(native.save).toHaveBeenCalledWith(expect.objectContaining({defaultPath:'SnowDown_BrowserExtension_0.1.14.zip',filters:[{name:'ZIP 压缩包',extensions:['zip']}]}))
+    expect(native.save).toHaveBeenCalledWith(expect.objectContaining({defaultPath:'SnowDown_BrowserExtension_0.1.15.zip',filters:[{name:'ZIP 压缩包',extensions:['zip']}]}))
     expect(native.invoke).toHaveBeenCalledWith('export_browser_extension_zip',{path})
   })
   it('propagates a native write failure for the panel to display',async()=>{

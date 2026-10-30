@@ -1,3 +1,4 @@
+import {archiveResources} from './resource-tools.js';
 import {cacheKey,cacheSite,authCookieSite,retryStableParse} from './cache-context.js';
 import {capturePage} from './page.js';
 import {linkedPageMedia} from './linked-page.js';
@@ -25,7 +26,7 @@ async function call(method,data={},deadline){
 let heartbeatPending,lastHeartbeat=0;
 async function heartbeat(force=false){if(heartbeatPending)return heartbeatPending;if(!force&&Date.now()-lastHeartbeat<1000)return {connected,version,binding,effectiveDesktop:connected&&(await prefs()).preferDesktop};
  heartbeatPending=checkHeartbeat().finally(()=>{heartbeatPending=null;lastHeartbeat=Date.now()});return heartbeatPending;}
-async function checkHeartbeat(){const result=await call('hello',{extensionVersion:chrome.runtime.getManifest().version,extensionRevision:'desktop-0.2.14'});const before=connected;connected=!!result.connected;version=result.data?.version||'';binding=result.data?.binding||'';
+async function checkHeartbeat(){const result=await call('hello',{extensionVersion:chrome.runtime.getManifest().version,extensionRevision:'desktop-0.2.15'});const before=connected;connected=!!result.connected;version=result.data?.version||'';binding=result.data?.binding||'';
  const settings=await prefs();if(connected&&binding&&settings.lastBinding!==binding){await chrome.storage.local.set({lastBinding:binding,preferDesktop:true,syncAccounts:true});}
  if(connected&&!before){lastSession='';void syncSessions();}
  await chrome.action.setBadgeText({text:connected?'✓':''});await chrome.action.setBadgeBackgroundColor({color:'#3478ee'});
@@ -75,6 +76,18 @@ chrome.webRequest.onHeadersReceived.addListener(details=>{
  }
 },{urls:['http://*/*','https://*/*']},['responseHeaders']);
 async function refererRules(){await chrome.declarativeNetRequest.updateDynamicRules({removeRuleIds:[1,2,3],addRules:[['bilibili.com',['bilivideo.com','bilivideo.cn']],['douyin.com',['douyinvod.com','douyin.com']],['xiaohongshu.com',['xhscdn.com','xiaohongshu.com']]].map(([host,domains],index)=>({id:index+1,priority:1,action:{type:'modifyHeaders',requestHeaders:[{header:'Referer',operation:'set',value:`https://www.${host}/`}]},condition:{initiatorDomains:[chrome.runtime.id],requestDomains:domains}}))})}
+async function archiveDownload(message){
+ const items=archiveResources(message.items,message.template),name=safeName(message.name||'网页资源');
+ const settings=await prefs();const state=await heartbeat();
+ const compatible=/^0\.2\.(?:1[5-9]|[2-9]\d|\d{3,})$/.test(version)||Number(version.split('.')[1])>2||Number(version.split('.')[0])>0;
+ if(settings.preferDesktop&&state.connected&&compatible&&JSON.stringify(items).length<400000&&items.every(item=>new URL(item.url).protocol==='https:')){
+  const result=await call('resource-archive',{items:items.map(({url,name})=>({url,name})),name});
+  if(result.error)throw Error(result.error);if(result.connected)return {message:'已加入 SnowDown ZIP 打包队列。'};
+ }
+ const id=crypto.randomUUID();await chrome.storage.session.set({['archive:'+id]:{items,name,createdAt:Date.now()}});
+ await chrome.tabs.create({url:chrome.runtime.getURL('archive.html?id='+id),active:false});
+ return {message:settings.preferDesktop?'已使用浏览器打包；桌面打包需要运行 v0.2.15 或更新版本，并使用公开 HTTPS 文件。':'已在后台打开 ZIP 打包进度页，请保留该页面。'};
+}
 async function download(message){
  if(message.stream?.native&&message.browserOnly)throw Error('此画质需要桌面端解析，不能改用浏览器直接下载。');
  const settings=await prefs();if(message.browserOnly)settings.preferDesktop=false;await heartbeat();
@@ -107,6 +120,7 @@ chrome.runtime.onMessage.addListener((message,sender,sendResponse)=>{
    case 'settings':{const update={};for(const key of ['preferDesktop','syncAccounts','floatingEnabled'])if(typeof message[key]==='boolean')update[key]=message[key];await chrome.storage.local.set(update);lastSession='';void syncSessions();return heartbeat();}
    case 'sync':lastSession='';await syncSessions();return {ok:connected};
    case 'download':return download(message);
+   case 'archive':return archiveDownload(message);
    case 'desktop-download':await chrome.tabs.create({url:repository});return {};
    default:throw Error('不支持的操作。');
   }

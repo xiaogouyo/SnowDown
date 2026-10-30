@@ -99,6 +99,7 @@ pub async fn run(
     cancel: &AtomicBool,
 ) -> Result<(), String> {
     let resource = task.resource.as_ref().ok_or("资源任务无效。")?;
+    if !resource.archive.is_empty(){return crate::resource_archive::run(app,state,task,cancel).await;}
     let url = validate(&resource.url)?;
     let host = url.host_str().unwrap();
     let addresses = tokio::net::lookup_host((host, 443))

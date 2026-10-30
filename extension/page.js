@@ -8,13 +8,19 @@ export async function capturePage({resources:includeResources=false,backgrounds=
   const resources=[];
   if(includeResources)for(const node of document.querySelectorAll('img,video,audio,source')){
     if(resources.length%64===0)await yieldMain();const src=node.currentSrc||node.src;if(!/^https?:/.test(src||''))continue;
-    resources.push({url:src,kind:node.tagName==='IMG'?'image':node.tagName==='AUDIO'?'audio':'video',width:node.naturalWidth||node.videoWidth||0,height:node.naturalHeight||node.videoHeight||0,name:node.alt||'',mime:node.type||''});
+    resources.push({url:src,kind:node.tagName==='IMG'?'image':node.tagName==='AUDIO'||node.tagName==='SOURCE'&&node.parentElement?.tagName==='AUDIO'?'audio':'video',width:node.naturalWidth||node.videoWidth||0,height:node.naturalHeight||node.videoHeight||0,name:node.alt||'',mime:node.type||''});
     if(resources.length>=1000)break;
   }
   if(includeResources)for(const entry of performance.getEntriesByType('resource').slice(-1000))resources.push({url:entry.name,...(entry.initiatorType==='img'?{kind:'image'}:{})});
   if(includeResources&&backgrounds)for(const node of [...document.querySelectorAll('*')].slice(0,5000)){
     await yieldMain();const value=getComputedStyle(node).backgroundImage;
     for(const match of value.matchAll(/url\(["']?(https?:[^"')]+)["']?\)/g))resources.push({url:match[1],kind:'image'});
+  }
+  if(includeResources)for(const node of [...document.querySelectorAll('img,source,a[href],object[data],embed[src]')].slice(0,3000)){
+    await yieldMain();const image=['IMG','SOURCE'].includes(node.tagName);
+    const urls=image?[node.getAttribute('data-src'),node.getAttribute('data-original'),node.getAttribute('data-lazy-src'),...(node.getAttribute('srcset')||node.getAttribute('data-srcset')||'').split(',').map(x=>x.trim().split(/\s+/)[0])]:[node.href||node.data||node.src];
+    for(const raw of urls){if(!raw)continue;try{const source=new URL(raw,location.href);if(!/^https?:$/.test(source.protocol))continue;const kind=image?'image':/\.(pdf|txt|csv|docx?|xlsx?|pptx?|zip|rar|7z)(?:$|[?#])/i.test(source.href)?'document':null;if(kind)resources.push({url:source.href,kind,name:node.alt||node.download||'',mime:node.type||''})}catch{}}
+    if(resources.length>=3000)break;
   }
   let id=platform==='douyin'?(new URL(url).searchParams.get('modal_id')||url.match(/\/video\/(\d+)/)?.[1]):platform==='xiaohongshu'?url.match(/\/(?:explore|item)\/([a-f\d]{24})/)?.[1]:url.match(/BV[\w]{10}/)?.[0];
   const roots=[...(Array.isArray(window.__snowdownMediaDetails)?window.__snowdownMediaDetails.slice(-4).reverse():[]),window.__INITIAL_STATE__,window._ROUTER_DATA,window.__UNIVERSAL_DATA_FOR_REHYDRATION__];

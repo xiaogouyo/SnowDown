@@ -8,6 +8,8 @@ use std::{
 const FILES: &[&str] = &[
     "manifest.json",
     "popup.html",
+    "archive.html",
+    "archive.js",
     "job.html",
     "parser.html",
     "parser-host.js",
