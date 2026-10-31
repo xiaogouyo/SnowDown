@@ -25,7 +25,7 @@ async function refresh() { if (!api.desktop) return; try { const value = await a
 function open() { visible.value = true; emit('visibility', true); void refresh() }
 function close() { visible.value = false; emit('visibility', false) }
 async function install(id: string) {
-  if(remoteNewer.value&&browsers.value.find(b=>b.id===id)?.installed){await downloadLatest();return}
+  if(id!=='chrome'&&remoteNewer.value&&browsers.value.find(b=>b.id===id)?.installed){await downloadLatest();return}
   busy.value = true; error.value = ''
   try { await api.installBrowserExtension(id) } catch (e) { error.value = errorMessage(e) }
   finally { busy.value = false; await refresh() }
@@ -50,17 +50,17 @@ onUnmounted(() => { disposed = true; clearInterval(timer) })
         <div class="extension-body">
           <p class="extension-intro">视频、图像一处收藏。内置插件 v{{ browsers[0]?.bundledVersion || '0.1.17' }}，可独立使用或连接桌面端。</p>
           <section class="plugin-updates" aria-label="插件更新检查">
-            <div class="update-heading"><div><strong>插件更新</strong><small>从 GitHub 检查独立插件正式版</small></div><button class="button secondary" :disabled="checking || downloading" @click="checkUpdates">{{ checking ? '正在检查…' : '检查插件更新' }}</button></div>
+            <div class="update-heading"><div><strong>插件更新</strong><small>Chrome 商店版自动更新 · ZIP 版从 GitHub 检查</small></div><button class="button secondary" :disabled="checking || downloading" @click="checkUpdates">{{ checking ? '正在检查…' : '检查插件更新' }}</button></div>
             <div v-if="latest" class="update-result" role="status"><strong>最新插件 v{{ latest.version }}</strong><p>{{ updateHint }}</p><div class="update-actions"><button class="button primary" :disabled="downloading" @click="downloadLatest">{{ downloading ? '正在下载并校验…' : '下载新版插件 ZIP' }}</button><button class="text-button" @click="openRelease">发布页面 ↗</button></div><details v-if="latest.notes"><summary>更新说明</summary><p class="update-notes">{{ latest.notes }}</p></details><p v-if="updateSaved" class="update-saved">已下载并通过 SHA256 校验。请解压覆盖原插件目录，再刷新浏览器扩展与网页。</p></div>
             <p v-if="updateError" class="task-error" role="alert">{{ updateError }}</p>
           </section>
           <div v-for="browser in browsers" :key="browser.id" class="browser-choice">
             <div><strong>{{ browser.name }}</strong><small><Check v-if="browser.connected" :size="12" />{{ browser.connected ? browser.extensionVersion ? `已连接 · 插件 v${browser.extensionVersion}` : '已连接 · 旧插件未报告版本' : browser.installed ? '已检测到浏览器 · 尚未连接插件' : '未安装' }}</small><small v-if="browser.updateAvailable || browser.refreshRequired">{{ browser.updateAvailable ? `可更新至 v${browser.bundledVersion}` : '请更新插件文件并在浏览器刷新扩展与网页' }}</small></div>
-            <button class="button" :class="browser.connected ? 'secondary' : 'primary'" :disabled="busy || downloading" @click="install(browser.id)">{{ remoteNewer && browser.installed ? '下载新版插件' : browser.installed ? browser.updateAvailable || browser.refreshRequired ? '更新插件' : browser.connected ? '管理插件' : '安装插件' : '下载浏览器' }}</button>
+            <button class="button" :class="browser.connected ? 'secondary' : 'primary'" :disabled="busy || downloading" @click="install(browser.id)">{{ !browser.installed ? '下载浏览器' : browser.id === 'chrome' ? '打开 Chrome 商店' : remoteNewer ? '下载新版插件' : browser.updateAvailable || browser.refreshRequired ? '更新插件' : browser.connected ? '管理插件' : '安装插件' }}</button>
           </div>
           <section class="extension-package" aria-label="插件 ZIP 本地安装">
             <span class="package-icon"><FileArchive :size="25" /></span>
-            <div class="package-copy"><strong>插件 ZIP</strong><small>{{ savedZip ? '已保存到本机' : '无法联动安装时，使用本地安装包' }}</small></div>
+            <div class="package-copy"><strong>插件 ZIP</strong><small>{{ savedZip ? '已保存到本机' : '无法访问商店时，使用本地安装包' }}</small></div>
             <button class="button secondary package-download" :disabled="exporting" @click="downloadZip"><CircleCheck v-if="savedZip && !exporting" :size="15" /><ArrowDownToLine v-else :size="15" />{{ exporting ? '正在保存…' : '下载 ZIP' }}</button>
           </section>
           <ol class="extension-flow" aria-label="插件本地安装图解">

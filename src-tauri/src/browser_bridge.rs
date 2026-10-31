@@ -1,4 +1,4 @@
-//! Native messaging is restricted to our stable extension ID. No HTTP server or
+//! Native messaging is restricted to our store and local extension IDs. No HTTP server or
 //! external-webpage messaging is exposed. The local broker requires a DPAPI token.
 use crate::{auth, batch, model::*, site_sessions, AppState};
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,14 @@ use tokio::{
     net::TcpListener,
 };
 pub const ID: &str = "dbhbjidcgjfmcoepcechajmoofdelkno";
+const STORE_ID: &str = "npedaeojbodmkfiaicobfdakidgafdim";
+const STORE_URL: &str = "https://chromewebstore.google.com/detail/snowdown/npedaeojbodmkfiaicobfdakidgafdim";
+fn allowed_origins() -> Vec<String> {
+    [ID, STORE_ID].iter().map(|id| format!("chrome-extension://{id}/")).collect()
+}
+fn trusted_origin(origin: &str) -> bool {
+    allowed_origins().iter().any(|allowed| allowed == origin)
+}
 const HOST: &str = "app.snowdown.bridge";
 const MAX: usize = 512 * 1024;
 static BINDING_WRITE: Mutex<()> = Mutex::new(());
@@ -45,6 +53,18 @@ fn extension_status(version: Option<&str>, revision: Option<&str>, bundled: &str
 #[cfg(test)]
 mod version_tests {
     use super::*;
+    #[test]
+    fn only_exact_store_and_local_origins_can_start_native_messaging() {
+        assert_eq!(allowed_origins().len(), 2);
+        for id in [ID, STORE_ID] {
+            assert!(trusted_origin(&format!("chrome-extension://{id}/")));
+            assert!(!trusted_origin(&format!("chrome-extension://{id}/other")));
+            assert!(!trusted_origin(&format!("https://{id}/")));
+            assert!(!trusted_origin(&format!("chrome-extension://{id}.evil/")));
+        }
+        assert!(!trusted_origin("chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"));
+        assert!(!trusted_origin(""));
+    }
     #[test]
     fn installed_extension_is_distinct_from_bundled_files() {
         assert_eq!(extension_status(Some("0.1.5"),None,"0.1.6"),(true,false));
@@ -133,7 +153,7 @@ pub fn register() -> Result<(), String> {
     if !host.is_file() {
         std::fs::copy(&executable, &host).map_err(|_| "无法准备浏览器消息组件。")?;
     }
-    std::fs::write(&manifest,serde_json::to_vec(&json!({"name":HOST,"description":"SnowDown local browser connection","path":host,"type":"stdio","allowed_origins":[format!("chrome-extension://{ID}/")]})).unwrap()).map_err(|_|"无法保存浏览器联动。")?;
+    std::fs::write(&manifest,serde_json::to_vec(&json!({"name":HOST,"description":"SnowDown local browser connection","path":host,"type":"stdio","allowed_origins":allowed_origins()})).unwrap()).map_err(|_|"无法保存浏览器联动。")?;
     for program in ["Google\\Chrome", "Microsoft\\Edge"] {
         reg(program, &manifest)?;
     }
@@ -209,6 +229,14 @@ pub fn install(app: &AppHandle, id: &str) -> Result<String, String> {
         return Ok(String::new());
     };
     register()?;
+    if id == "chrome" {
+        ensure_bindings(&[id])?;
+        std::process::Command::new(executable)
+            .arg(STORE_URL)
+            .spawn()
+            .map_err(|_| "无法打开 Chrome 插件商店。")?;
+        return Ok(STORE_URL.into());
+    }
     let directory = root().join("extension");
     std::fs::create_dir_all(&directory).map_err(|_| "无法准备插件文件。")?;
     let source = app
@@ -254,11 +282,13 @@ fn ensure_bindings(ids: &[&str]) -> Result<(), String> {
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default();
+    let mut changed = false;
     for id in ids {
         bindings
             .entry((*id).into())
-            .or_insert_with(|| uuid::Uuid::new_v4().to_string());
+            .or_insert_with(|| { changed = true; uuid::Uuid::new_v4().to_string() });
     }
+    if !changed { return Ok(()); }
     std::fs::write(path, serde_json::to_vec(&bindings).unwrap())
         .map_err(|_| "无法保存绑定配置。")?;
     Ok(())
@@ -275,7 +305,7 @@ pub fn native_host() -> bool {
     if !args.iter().any(|a| a.starts_with("chrome-extension://")) {
         return false;
     }
-    if args.get(1).map(String::as_str) != Some(&format!("chrome-extension://{ID}/")) {
+    if !args.get(1).is_some_and(|origin| trusted_origin(origin)) {
         return true;
     }
     let mut input = std::io::stdin().lock();
@@ -411,6 +441,8 @@ async fn dispatch(app: &AppHandle, state: &AppState, request: &Value) -> Result<
         .filter(|id| matches!(*id, "chrome" | "edge"))
         .ok_or("未知浏览器。")?;
     if request["method"] == "hello" {
+        // Store installations can connect without first using the desktop install button.
+        ensure_bindings(&[browser])?;
         state
             .browser
             .clients

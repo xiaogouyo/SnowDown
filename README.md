@@ -2,14 +2,15 @@
 
 Windows 桌面视频下载工具与 Chrome / Edge 插件，共用 50 类平台目录；桌面另提供视频号专用解析入口。支持原三平台专用解析、更多站点通用提取器和浏览器媒体读取；实际范围见[平台说明](docs/platform-support.md)。
 
-## 下载 v0.2.16 / 插件 v0.1.17
+## 下载 v0.2.17 / 插件 v0.1.17
 
-- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.16/SnowDown_0.2.16_x64-setup.exe)
-- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.16/SnowDown_0.2.16_Windows_x64_portable.zip)
+- [Windows x64 安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.17/SnowDown_0.2.17_x64-setup.exe)
+- [Windows x64 免安装版](https://github.com/xiaogouyo/snowdown/releases/download/v0.2.17/SnowDown_0.2.17_Windows_x64_portable.zip)
+- [Chrome 商店安装](https://chromewebstore.google.com/detail/snowdown/npedaeojbodmkfiaicobfdakidgafdim)
 - [独立浏览器插件 v0.1.17](https://github.com/xiaogouyo/snowdown/releases/download/extension-v0.1.17/SnowDown_BrowserExtension_0.1.17.zip)
-- [发布说明与校验记录](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.16)
+- [发布说明与校验记录](https://github.com/xiaogouyo/snowdown/releases/tag/v0.2.17)
 
-桌面 v0.2.16 新增视频号分享链接解析和下载：在设置 → 平台账号 → 视频号中打开腾讯元宝官方页面，由用户完成登录并保存解析会话，再粘贴视频号链接解析。会话仅在本机加密保存，与其他平台独立；详情见[隐私政策](PRIVACY.md)。
+桌面 v0.2.17 接入 Chrome 商店安装与桌面联动，兼容原 ZIP 插件；商店版由浏览器自动更新。视频号分享链接解析和下载：在设置 → 平台账号 → 视频号中打开腾讯元宝官方页面，由用户完成登录并保存解析会话，再粘贴视频号链接解析。会话仅在本机加密保存，与其他平台独立；详情见[隐私政策](PRIVACY.md)。
 
 视频号首批支持官方接口返回的普通可播放视频、MP4/M4A 输出和封面。画质以实际响应为准；源站不支持分段时使用单连接，恢复任务可能重新传输。插件继续使用 v0.1.17，支持网页资源分类、网格预览、筛选、全选/反选及浏览器或桌面 ZIP 打包。原有登录、设置及下载内容继续沿用。
 
@@ -62,7 +63,7 @@ v0.1.4 在视频预览卡片和可见播放器旁提供原 Logo 下载按钮，�
 
 桌面 v0.2.4 曾内置插件 v0.1.1：新标签页适配完整窗口，新增右侧视频悬浮球和原位展开的下载设置卡片。提醒可在插件设置关闭；三平台默认支持，其他网页需授权。插件更新后在扩展管理页刷新一次，已有视频页面也可刷新。
 
-桌面端左侧新增插件贴片，可检测 Chrome / Edge、准备插件目录并绑定；插件独立版本为 v0.1.5。浏览器首次需开启开发者模式并确认“加载已解压的扩展”，当前未上架商店，不能静默安装。详细的安装、权限、独立下载、桌面联动与隐私说明见 [插件使用说明](extension/README.md)。软件离线时插件自动回退浏览器下载，重新打开后恢复连接。
+桌面端左侧新增插件贴片，可检测 Chrome / Edge、准备插件目录并绑定；插件独立版本为 v0.1.17。ZIP 版首次需开启开发者模式并确认“加载已解压的扩展”。Chrome 已上架[官方商店](https://chromewebstore.google.com/detail/snowdown/npedaeojbodmkfiaicobfdakidgafdim)，可直接打开商店安装；ZIP 版仍可备用。详细的安装、权限、独立下载、桌面联动与隐私说明见 [插件使用说明](extension/README.md)。软件离线时插件自动回退浏览器下载，重新打开后恢复连接。
 
 v0.2.3 可在插件面板直接“下载 ZIP”，从内置资源离线生成本地安装包；联动安装失败也可使用。解压后在浏览器扩展管理页加载包含 manifest.json 的文件夹。安装教学改为五步图标流程，悬停或键盘聚焦图标可查看提示。上一版动画更新已统一归档为 v0.2.2；此前安装过误标 v0.2.3 动画版的用户，需要手动覆盖安装新 v0.2.3 一次。
 

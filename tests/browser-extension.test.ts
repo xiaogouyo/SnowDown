@@ -21,6 +21,16 @@ beforeEach(async()=>{
 })
 afterEach(()=>{wrapper.unmount();document.body.innerHTML=''})
 describe('browser extension local installation',()=>{
+  it('opens the Chrome store even when a newer GitHub ZIP exists',async()=>{
+    api.browserStatus.mockResolvedValue([{id:'chrome',name:'Google Chrome',installed:true,connected:false,bundledVersion:'0.1.6'}]);
+    checkUpdate().click();await flushPromises();
+    const button=modal().querySelector<HTMLButtonElement>('.browser-choice button')!;
+    expect(button.textContent).toBe('打开 Chrome 商店');
+    button.click();await flushPromises();
+    expect(api.installBrowserExtension).toHaveBeenCalledWith('chrome');
+    expect(api.saveBrowserExtensionUpdate).not.toHaveBeenCalled();
+    expect(modal().textContent).toContain('商店版自动更新');
+  })
   it('checks GitHub on request and compares the running plugin instead of bundled files',async()=>{
     expect(api.checkBrowserExtensionUpdate).not.toHaveBeenCalled();api.browserStatus.mockResolvedValue([{id:'edge',name:'Microsoft Edge',installed:true,connected:true,extensionVersion:'0.1.8',bundledVersion:'0.1.6'}]);checkUpdate().click();await flushPromises();expect(api.checkBrowserExtensionUpdate).toHaveBeenCalledTimes(1);expect(modal().textContent).toContain('最新插件 v0.1.9');expect(modal().textContent).toContain('发现新版插件');modal().querySelector<HTMLButtonElement>('.update-actions .primary')!.click();await flushPromises();expect(api.saveBrowserExtensionUpdate).toHaveBeenCalledWith(release);expect(modal().textContent).toContain('通过 SHA256 校验');
   })
