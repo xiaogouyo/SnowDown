@@ -115,6 +115,7 @@ mod tests {
         let settings = Settings {
             clipboard_enabled: true,
             clipboard_auto_parse: false,
+            dynamic_island_enabled: false,
             download_dir: "D:\\视频".into(),
             concurrency: 2,
             max_speed_mbps: 0,
@@ -124,10 +125,14 @@ mod tests {
             save_subtitles: false,
         };
         store.save_settings(&settings).unwrap();
-        assert_eq!(
-            store.load_settings(settings).unwrap().download_dir,
-            "D:\\视频"
-        );
+        let restored = store
+            .load_settings(Settings {
+                dynamic_island_enabled: true,
+                ..settings
+            })
+            .unwrap();
+        assert_eq!(restored.download_dir, "D:\\视频");
+        assert!(!restored.dynamic_island_enabled);
     }
 
     #[test]

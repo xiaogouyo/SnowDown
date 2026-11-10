@@ -7,7 +7,7 @@ import type { Settings, VideoInfo } from '../src/types'
 
 const api = vi.hoisted(() => ({ inspectVideo: vi.fn(), createBatch: vi.fn(), chooseDirectory: vi.fn() }))
 vi.mock('../src/api', () => ({ ...api, __v_isRef: false }))
-const settings: Settings = { downloadDir: 'D:\\视频', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false }
+const settings: Settings = { downloadDir: 'D:\\视频', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false, dynamicIslandEnabled: true }
 const bili = 'https://www.bilibili.com/video/BV1xx411c7mD'
 const dy = 'https://www.douyin.com/video/1234567890123456789'
 const video: VideoInfo = { platform: 'bilibili', sourceUrl: bili, bvid: 'BV1xx411c7mD', title: '标题', cover: '', author: '', duration: 1, selectedCid: 2, pages: [{ cid: 1, page: 1, part: 'P1', duration: 1 }, { cid: 2, page: 2, part: 'P2', duration: 1 }], qualities: [{ id: 80, label: '1080P', width: 1920, height: 1080 }, { id: 32, label: '480P', width: 852, height: 480 }] }

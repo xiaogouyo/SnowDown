@@ -13,6 +13,7 @@ export interface Settings {
   saveSubtitles: boolean
   clipboardEnabled: boolean
   clipboardAutoParse: boolean
+  dynamicIslandEnabled: boolean
 }
 
 export interface VideoPage { cid: number; page: number; part: string; duration: number }

@@ -1,16 +1,17 @@
 use serde::Serialize;
+use std::sync::Arc;
 use tauri::{
-    AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewUrl,
-    WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
 };
 
 pub const LABEL: &str = "dynamic-island";
 
-pub fn create(app: &AppHandle) -> tauri::Result<()> {
+pub fn create(app: &AppHandle, state: Arc<crate::AppState>) -> tauri::Result<()> {
     let island =
         WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html?view=island".into()))
             .title("SnowDown 灵动岛")
-            .inner_size(710., 48.)
+            .inner_size(710., 42.)
             .decorations(false)
             .transparent(true)
             .shadow(false)
@@ -22,7 +23,6 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             .build()?;
     let main = app.get_webview_window("main").expect("main window");
     std::thread::spawn(move || {
-        let mut monitor = None;
         let mut shown = false;
         #[cfg(windows)]
         let mut sampler = None;
@@ -31,7 +31,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             std::thread::sleep(std::time::Duration::from_millis(150));
             let minimized =
                 main.is_visible().unwrap_or(false) && main.is_minimized().unwrap_or(false);
-            if !minimized {
+            if !minimized || !state.settings.lock().unwrap().dynamic_island_enabled {
                 if shown {
                     let _ = island.hide();
                     shown = false;
@@ -40,18 +40,9 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
                         sampler = None;
                     }
                 }
-                if let Ok(Some(current)) = main.current_monitor() {
-                    monitor = Some(current);
-                }
                 continue;
             }
             if !shown {
-                if let Some(screen) = monitor
-                    .clone()
-                    .or_else(|| main.primary_monitor().ok().flatten())
-                {
-                    let _ = place(&island, &screen, None);
-                }
                 if island.show().is_err() {
                     continue;
                 }
@@ -72,85 +63,62 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-fn place(island: &WebviewWindow, screen: &Monitor, size: Option<(u32, u32)>) -> tauri::Result<()> {
-    let scale = screen.scale_factor();
-    let size = if let Some((width, height)) = size {
-        PhysicalSize::new(
-            (width as f64 * scale).round() as u32,
-            (height as f64 * scale).round() as u32,
-        )
-    } else {
-        island.inner_size()?
-    };
-    let width = size.width.min(screen.size().width);
-    let height = size.height.min(screen.size().height);
-    island.set_size(PhysicalSize::new(width, height))?;
-    island.set_position(PhysicalPosition::new(
-        screen.position().x + ((screen.size().width - width) / 2) as i32,
-        screen.position().y,
-    ))?;
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::Graphics::Gdi::{
-            CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, RGN_OR,
-        };
-        let hwnd = island.hwnd()?.0;
-        let radius = (16. * scale).round() as i32;
-        // Fill the upper corners of the rounded region so it meets the screen edge.
-        unsafe {
-            let region =
-                CreateRoundRectRgn(0, 0, width as i32, height as i32, radius * 2, radius * 2);
-            let top = CreateRectRgn(0, 0, width as i32, radius);
-            if !region.is_null() && !top.is_null() {
-                CombineRgn(region, region, top, RGN_OR);
-            }
-            if !top.is_null() {
-                DeleteObject(top);
-            }
-            if !region.is_null() && SetWindowRgn(hwnd, region, 1) == 0 {
-                DeleteObject(region);
-            }
-        }
-    }
-    Ok(())
+#[derive(Serialize)]
+pub struct Placement {
+    x: i32,
+    y: i32,
+    docked: bool,
 }
 
 #[tauri::command]
-pub fn resize_island(window: WebviewWindow, width: u32, height: u32) -> Result<(), String> {
+pub fn resize_island(
+    window: WebviewWindow,
+    width: u32,
+    height: u32,
+    position: Option<PhysicalPosition<i32>>,
+    snap: bool,
+) -> Result<Placement, String> {
     if window.label() != LABEL {
         return Err("仅限灵动岛窗口。".into());
     }
-    let monitor = window
-        .current_monitor()
-        .ok()
-        .flatten()
+    let monitor = position
+        .and_then(|point| {
+            window
+                .monitor_from_point(point.x as f64, point.y as f64)
+                .ok()
+                .flatten()
+        })
+        .or_else(|| {
+            let main = window.app_handle().get_webview_window("main")?;
+            main.current_monitor().ok().flatten()
+        })
         .or_else(|| window.primary_monitor().ok().flatten())
         .ok_or("无法确定屏幕。")?;
-    place(
-        &window,
-        &monitor,
-        Some((width.clamp(180, 2400), height.clamp(26, 600))),
-    )
-    .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub fn set_island_frost(window: WebviewWindow, enabled: bool) -> Result<(), String> {
-    use tauri::utils::{
-        config::{Color, WindowEffectsConfig},
-        WindowEffect,
-    };
-    if window.label() != LABEL {
-        return Err("仅限灵动岛窗口。".into());
+    let scale = monitor.scale_factor();
+    let width = ((width.clamp(240, 2400) as f64 * scale).round() as u32).min(monitor.size().width);
+    let height = ((height.clamp(32, 460) as f64 * scale).round() as u32).min(monitor.size().height);
+    let origin = monitor.position();
+    let right = origin.x + (monitor.size().width - width) as i32;
+    let bottom = origin.y + (monitor.size().height - height) as i32;
+    let point = position
+        .unwrap_or_else(|| PhysicalPosition::new(origin.x + (right - origin.x) / 2, origin.y));
+    let x = point.x.clamp(origin.x, right);
+    let mut y = point.y.clamp(origin.y, bottom);
+    if snap && (y - origin.y) as f64 <= 20. * scale {
+        y = origin.y;
     }
-    let effects = enabled.then(|| WindowEffectsConfig {
-        effects: vec![WindowEffect::Acrylic],
-        color: Some(Color(18, 25, 40, 24)),
-        ..Default::default()
-    });
+    // Position first so the receiving monitor applies the correct DPI before resizing.
     window
-        .set_effects(effects)
-        .map_err(|error| error.to_string())
+        .set_position(PhysicalPosition::new(x, y))
+        .map_err(|error| error.to_string())?;
+    window
+        .set_size(PhysicalSize::new(width, height))
+        .map_err(|error| error.to_string())?;
+    Ok(Placement {
+        x,
+        y,
+        docked: y == origin.y,
+    })
 }
 
 #[tauri::command]

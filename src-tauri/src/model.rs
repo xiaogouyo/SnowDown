@@ -71,6 +71,8 @@ pub struct Settings {
     pub clipboard_enabled: bool,
     #[serde(default)]
     pub clipboard_auto_parse: bool,
+    #[serde(default = "enabled")]
+    pub dynamic_island_enabled: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -266,6 +268,7 @@ mod tests {
     fn legacy_settings_and_video_records_keep_bilibili_defaults() {
         let settings: Settings = serde_json::from_value(serde_json::json!({"downloadDir":"D:\\videos","concurrency":2,"maxSpeedMbps":0,"saveCover":false,"saveDanmaku":false,"saveSubtitles":false})).unwrap();
         assert!(settings.clipboard_enabled);
+        assert!(settings.dynamic_island_enabled);
         assert!(!settings.clipboard_auto_parse);
         assert_eq!(settings.download_connections, 8);
         let video: VideoInfo = serde_json::from_value(serde_json::json!({"bvid":"BV1xx411c7mD","title":"legacy","cover":"","author":"","duration":1,"pages":[],"qualities":[],"selectedCid":1})).unwrap();

@@ -53,7 +53,7 @@ const updateCenter = ref<InstanceType<typeof UpdateCenter>>()
 const updateOpen = ref(false)
 const extensionOpen = ref(false)
 const settingsTab = ref<'download' | 'account'>('download')
-const settingsDraft = reactive<Settings>({ downloadDir: '', concurrency: 2, downloadConnections: 8, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false })
+const settingsDraft = reactive<Settings>({ downloadDir: '', concurrency: 2, downloadConnections: 8, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false, dynamicIslandEnabled: true })
 const accountPlatform = ref<Platform>('bilibili')
 const clipboardSuggestion = ref<SourceLink | null>(null)
 const pendingClipboard = ref<ClipboardCapture | null>(null)
@@ -324,7 +324,7 @@ async function chooseFolder() {
 
 async function saveSettings() {
   savingSettings.value = true
-  try { await api.saveSettings({ ...settingsDraft }); dialog.value = null; notify('下载设置已保存，新任务将使用这些设置。', 'success') }
+  try { await api.saveSettings({ ...settingsDraft }); dialog.value = null; notify('偏好设置已保存。', 'success') }
   catch (error) { notify(errorMessage(error), 'error') }
   finally { savingSettings.value = false }
 }
@@ -592,6 +592,7 @@ onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); u
         <div class="settings-tabs"><button :class="{ active: settingsTab === 'download' }" @click="settingsTab = 'download'"><SlidersHorizontal :size="15" />下载设置</button><button :class="{ active: settingsTab === 'account' }" @click="settingsTab = 'account'"><UserRound :size="15" />平台账号</button></div>
         <div v-if="settingsTab === 'download'" class="settings-content">
           <AutostartToggle />
+          <label class="toggle-row"><span><Square :size="17" /><span>灵动岛<small>点击窗口右上角的最小化按钮后，在屏幕顶部显示。保存设置后生效。</small></span></span><input v-model="settingsDraft.dynamicIslandEnabled" type="checkbox" role="switch" aria-label="灵动岛" /></label>
           <div class="settings-divider"></div>
           <label class="field-label">下载位置</label><div class="folder-field"><FolderOpen :size="17" /><input v-model="settingsDraft.downloadDir" placeholder="选择本地文件夹" aria-label="下载位置" /><button @click="chooseFolder">浏览</button></div>
           <div class="settings-two-col"><div><span class="field-label">同时下载任务数</span><UiSelect :model-value="settingsDraft.concurrency" :options="concurrencyOptions" label="同时下载任务数" @update:model-value="value => settingsDraft.concurrency = Number(value)" /></div><div><span class="field-label">每文件下载连接数</span><UiSelect :model-value="settingsDraft.downloadConnections ?? 8" :options="connectionOptions" label="每文件下载连接数" @update:model-value="value => settingsDraft.downloadConnections = Number(value)" /><small>视频与更新共用；服务器支持时并行分段，继续下载后生效</small></div></div><div class="settings-two-col"><label><span class="field-label">单任务限速（MB/s）</span><input v-model.number="settingsDraft.maxSpeedMbps" type="number" min="0" max="1024" /><small>设为 0 表示不限速</small></label></div>
@@ -638,7 +639,7 @@ onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); u
           </template>
           <div v-if="accountPlatform !== 'channels'" class="login-privacy"><ShieldCheck :size="16" /><span>二维码来自平台官方登录流程，过期后自动更新。登录状态由 Windows 加密保存，仅供当前系统用户使用。登录与视频解析相互独立。</span></div>
         </div>
-        <div v-if="settingsTab === 'download'" class="modal-footer"><span>设置适用于之后创建的新任务</span><button class="button primary" :disabled="savingSettings" @click="saveSettings"><Check :size="16" />保存设置</button></div>
+        <div v-if="settingsTab === 'download'" class="modal-footer"><span>下载参数适用于之后创建的新任务</span><button class="button primary" :disabled="savingSettings" @click="saveSettings"><Check :size="16" />保存设置</button></div>
       </section>
     </div>
 

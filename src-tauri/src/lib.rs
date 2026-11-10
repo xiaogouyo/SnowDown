@@ -801,6 +801,7 @@ pub fn run() {
                     save_subtitles: false,
                     clipboard_enabled: true,
                     clipboard_auto_parse: false,
+                    dynamic_island_enabled: true,
                 })
                 .map_err(std::io::Error::other)?;
             let tasks = storage.load_tasks().map_err(std::io::Error::other)?;
@@ -828,7 +829,7 @@ pub fn run() {
             app.manage(state.clone());
             notifications::prepare(&handle, &data_dir);
             tray_menu::create(&handle)?;
-            if let Err(error) = island::create(&handle) {
+            if let Err(error) = island::create(&handle, state.clone()) {
                 eprintln!("灵动岛初始化失败：{error}");
             }
             update_notice::create(&handle)?;
@@ -941,7 +942,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             island::resize_island,
-            island::set_island_frost,
             island::restore_from_island,
             autostart_status,
             set_autostart,

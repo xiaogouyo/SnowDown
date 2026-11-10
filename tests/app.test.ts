@@ -12,7 +12,7 @@ const api = vi.hoisted(() => ({
 vi.mock('../src/api', () => ({ ...api, __v_isRef: false }))
 
 const initial: AppSnapshot = {
-  tasks: [], settings: { downloadDir: 'D:\\视频', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
+  tasks: [], settings: { downloadDir: 'D:\\视频', concurrency: 2, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false, dynamicIslandEnabled: true },
   siteSessions: [], mediaReady: true, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.1.6',
 }
 const video: VideoInfo = {
@@ -51,6 +51,17 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); localStorage.clear(); vi.useRealTimers() })
 
 describe('desktop download flow', () => {
+  it('saves the dynamic island switch with download preferences', async () => {
+    await flushPromises()
+    await wrapper.findAll('.nav-item').find(button => button.text() === '设置')!.trigger('click')
+    const toggle = wrapper.get<HTMLInputElement>('[aria-label="灵动岛"]')
+    expect(toggle.element.checked).toBe(true)
+    await toggle.setValue(false)
+    expect(api.saveSettings).not.toHaveBeenCalled()
+    await wrapper.get('.settings-modal .modal-footer button').trigger('click')
+    await flushPromises()
+    expect(api.saveSettings).toHaveBeenCalledWith({ ...initial.settings, downloadConnections: 8, dynamicIslandEnabled: false })
+  })
   async function minimal() { await flushPromises(); await wrapper.get('[aria-label="切换到简约模式"]').trigger('click'); await flushPromises() }
   it('switches to a centered minimal input with only brand and window controls and remembers the mode', async () => {
     await minimal()

@@ -9,7 +9,7 @@ export const desktop = isTauri()
 export async function getSnapshot(): Promise<AppSnapshot> {
   if (!desktop) return {
     tasks: [],
-    settings: { downloadDir: '', concurrency: 2, downloadConnections: 8, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false },
+    settings: { downloadDir: '', concurrency: 2, downloadConnections: 8, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false, dynamicIslandEnabled: true },
     siteSessions: [],
     mediaReady: false, authenticated: false, auth: { state: 'loggedout', account: null, message: null }, version: '0.2.4',
   }
