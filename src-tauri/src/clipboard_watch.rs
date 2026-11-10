@@ -191,6 +191,7 @@ impl Monitor {
 pub fn emit(app: &AppHandle, state: &AppState) {
     let status = state.clipboard.status();
     let _ = app.emit_to("main", "snowdown://clipboard", &status);
+    let _ = app.emit_to(crate::island::LABEL, "snowdown://clipboard", &status);
     let text = match status.capture.as_ref().map(|capture| capture.phase) {
         Some(Phase::Parsing) => "SnowDown · 正在后台解析剪贴板链接",
         Some(Phase::Ready) => "SnowDown · 链接已解析，打开软件选择下载",

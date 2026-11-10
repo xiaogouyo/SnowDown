@@ -13,6 +13,7 @@ mod clipboard_watch;
 #[cfg(debug_assertions)]
 mod debug_probe;
 mod engine;
+mod island;
 mod extension_package;
 #[cfg(all(debug_assertions, windows))]
 mod extension_package_probe;
@@ -827,6 +828,9 @@ pub fn run() {
             app.manage(state.clone());
             notifications::prepare(&handle, &data_dir);
             tray_menu::create(&handle)?;
+            if let Err(error) = island::create(&handle) {
+                eprintln!("灵动岛初始化失败：{error}");
+            }
             update_notice::create(&handle)?;
             #[cfg(debug_assertions)]
             let browser_test = std::env::var_os("SNOWDOWN_CHANNELS_PREVIEW").is_some()
@@ -926,13 +930,19 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if matches!(window.label(), "main" | "tray-menu" | "update-notice") {
+                if window.label() == island::LABEL {
+                    api.prevent_close();
+                    show_main(window.app_handle());
+                } else if matches!(window.label(), "main" | "tray-menu" | "update-notice") {
                     api.prevent_close();
                     let _ = window.hide();
                 }
             }
         })
         .invoke_handler(tauri::generate_handler![
+            island::resize_island,
+            island::set_island_frost,
+            island::restore_from_island,
             autostart_status,
             set_autostart,
             get_snapshot,
