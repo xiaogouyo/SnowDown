@@ -942,6 +942,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             island::resize_island,
+            island::layout_island_settings,
             island::restore_from_island,
             autostart_status,
             set_autostart,

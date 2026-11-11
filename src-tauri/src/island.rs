@@ -8,6 +8,7 @@ use tauri::{
 pub const LABEL: &str = "dynamic-island";
 const DEFAULT_WIDTH: u32 = 710;
 const DEFAULT_HEIGHT: u32 = 42;
+const EXIT_DURATION: std::time::Duration = std::time::Duration::from_millis(180);
 
 pub fn create(app: &AppHandle, state: Arc<crate::AppState>) -> tauri::Result<()> {
     let island =
@@ -30,17 +31,25 @@ pub fn create(app: &AppHandle, state: Arc<crate::AppState>) -> tauri::Result<()>
     let main = app.get_webview_window("main").expect("main window");
     std::thread::spawn(move || {
         let mut shown = false;
+        let mut hide_at = None;
         #[cfg(windows)]
         let mut sampler = None;
         let mut next_sample = std::time::Instant::now();
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(150));
+            let poll_ms = if hide_at.is_some() { 30 } else { 150 };
+            std::thread::sleep(std::time::Duration::from_millis(poll_ms));
             let minimized =
                 main.is_visible().unwrap_or(false) && main.is_minimized().unwrap_or(false);
             if !minimized || !state.settings.lock().unwrap().dynamic_island_enabled {
                 if shown {
-                    let _ = island.hide();
-                    shown = false;
+                    let deadline = hide_at.get_or_insert_with(|| {
+                        let _ = island.emit("snowdown://island-hiding", ());
+                        std::time::Instant::now() + EXIT_DURATION
+                    });
+                    if std::time::Instant::now() >= *deadline && island.hide().is_ok() {
+                        shown = false;
+                        hide_at = None;
+                    }
                     #[cfg(windows)]
                     {
                         sampler = None;
@@ -48,7 +57,7 @@ pub fn create(app: &AppHandle, state: Arc<crate::AppState>) -> tauri::Result<()>
                 }
                 continue;
             }
-            if !shown {
+            if !shown || hide_at.take().is_some() {
                 if island.show().is_err() {
                     continue;
                 }
@@ -67,6 +76,73 @@ pub fn create(app: &AppHandle, state: Arc<crate::AppState>) -> tauri::Result<()>
         }
     });
     Ok(())
+}
+
+#[derive(Serialize)]
+struct SettingsRect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+#[derive(Serialize)]
+pub struct SettingsLayout {
+    source: SettingsRect,
+    studio: SettingsRect,
+}
+
+#[tauri::command]
+pub fn layout_island_settings(
+    window: WebviewWindow,
+    flight: bool,
+) -> Result<SettingsLayout, String> {
+    if window.label() != LABEL {
+        return Err("仅限灵动岛窗口。".into());
+    }
+    let monitor = window
+        .current_monitor()
+        .map_err(|error| error.to_string())?
+        .ok_or("无法确定屏幕。")?;
+    let work = monitor.work_area();
+    let scale = monitor.scale_factor();
+    let source = window.outer_position().map_err(|error| error.to_string())?;
+    let source_size = window.inner_size().map_err(|error| error.to_string())?;
+    let width = ((600. * scale).round() as u32).min(work.size.width);
+    let height = ((560. * scale).round() as u32).min(work.size.height);
+    let x = work.position.x + ((work.size.width - width) / 2) as i32;
+    let y = work.position.y + ((work.size.height - height) / 2) as i32;
+    let left = if flight { x.min(source.x) } else { x };
+    let top = if flight { y.min(source.y) } else { y };
+    let right = if flight {
+        (x + width as i32).max(source.x + source_size.width as i32)
+    } else {
+        x + width as i32
+    };
+    let bottom = if flight {
+        (y + height as i32).max(source.y + source_size.height as i32)
+    } else {
+        y + height as i32
+    };
+    window
+        .set_position(PhysicalPosition::new(left, top))
+        .map_err(|error| error.to_string())?;
+    window
+        .set_size(PhysicalSize::new(
+            (right - left) as u32,
+            (bottom - top) as u32,
+        ))
+        .map_err(|error| error.to_string())?;
+    let local_rect = |x: i32, y: i32, width: u32, height: u32| SettingsRect {
+        x: (x - left) as f64 / scale,
+        y: (y - top) as f64 / scale,
+        width: width as f64 / scale,
+        height: height as f64 / scale,
+    };
+    Ok(SettingsLayout {
+        source: local_rect(source.x, source.y, source_size.width, source_size.height),
+        studio: local_rect(x, y, width, height),
+    })
 }
 
 #[derive(Serialize)]
