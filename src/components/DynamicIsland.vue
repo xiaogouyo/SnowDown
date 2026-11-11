@@ -19,10 +19,16 @@ const defaults = {
   downloads: true, clock: true, usage: true, date: false,
   zones: ['local'],
 }
+const zones = ['local', 'UTC', ...(Intl.supportedValuesOf?.('timeZone') ?? ['Asia/Shanghai'])]
 function loadPreferences(): typeof defaults {
   try {
     const saved = { ...defaults, ...JSON.parse(localStorage.getItem(storageKey) ?? '{}') }
+    saved.width = Number.isInteger(saved.width) && saved.width >= 240 && saved.width <= 2400 ? saved.width : defaults.width
     saved.height = saved.height >= 32 && saved.height <= 120 ? saved.height : defaults.height
+    if (!Number.isInteger(saved.height)) saved.height = defaults.height
+    if (!Number.isInteger(saved.position?.x) || !Number.isInteger(saved.position?.y)) saved.position = null
+    saved.zones = Array.isArray(saved.zones) ? saved.zones.filter((zone: string) => zones.includes(zone)) : []
+    if (!saved.zones.length) saved.zones = defaults.zones
     return saved
   }
   catch { return { ...defaults } }
@@ -30,7 +36,6 @@ function loadPreferences(): typeof defaults {
 const prefs = reactive(loadPreferences())
 const editing = ref(false)
 const docked = ref(true)
-const shown = ref(false)
 const moving = ref(false)
 const resizing = ref(false)
 let suppressRestoreUntil = 0
@@ -42,7 +47,6 @@ const now = ref(new Date())
 const zoneToAdd = ref('Asia/Shanghai')
 const stops: (() => void)[] = []
 
-const zones = ['local', ...Intl.supportedValuesOf('timeZone')]
 const clockFormat = computed(() => prefs.zones.map(zone => new Intl.DateTimeFormat('zh-CN', {
   timeZone: zone === 'local' ? undefined : zone,
   hourCycle: 'h23', hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -74,7 +78,11 @@ async function place(width: number, height: number, position: Point | null, snap
 }
 
 async function layout() {
-  await place(editing.value ? 436 : prefs.width, editing.value ? 400 : prefs.height, prefs.position)
+  try {
+    await place(editing.value ? 436 : prefs.width, editing.value ? 400 : prefs.height, prefs.position)
+  } catch (error) {
+    console.warn('灵动岛窗口位置调整失败', error)
+  }
 }
 function openSettings() { editing.value = true; void layout() }
 function closeSettings() { editing.value = false; void layout() }
@@ -163,20 +171,23 @@ watch(prefs, value => localStorage.setItem(storageKey, JSON.stringify(value)))
 onMounted(async () => {
   const timer = window.setInterval(() => { now.value = new Date() }, 1000)
   stops.push(() => window.clearInterval(timer))
-  stops.push(await listen<typeof usage.value>('snowdown://island-usage', event => { usage.value = event.payload }))
-  stops.push(await listen('snowdown://island-shown', () => {
-    now.value = new Date()
-    usage.value = undefined
-    editing.value = false
-    shown.value = false
-    void layout().then(() => requestAnimationFrame(() => { shown.value = true }))
-  }))
-  stops.push(await subscribe(value => { state.value = value }))
-  stops.push(await subscribeClipboard(value => { capture.value = value.capture }))
-  state.value ??= await getSnapshot()
-  capture.value ??= (await getClipboardStatus()).capture
-  await layout()
-  shown.value = true
+  void layout()
+  const subscriptions = await Promise.allSettled([
+    listen<typeof usage.value>('snowdown://island-usage', event => { usage.value = event.payload }),
+    listen('snowdown://island-shown', () => {
+      now.value = new Date()
+      usage.value = undefined
+      closeSettings()
+    }),
+    subscribe(value => { state.value = value }),
+    subscribeClipboard(value => { capture.value = value.capture }),
+  ])
+  for (const subscription of subscriptions) {
+    if (subscription.status === 'fulfilled') stops.push(subscription.value)
+  }
+  const [snapshot, clipboard] = await Promise.allSettled([getSnapshot(), getClipboardStatus()])
+  if (snapshot.status === 'fulfilled') state.value ??= snapshot.value
+  if (clipboard.status === 'fulfilled') capture.value ??= clipboard.value.capture
 })
 onUnmounted(() => { cancelGesture?.(); stops.forEach(stop => stop()) })
 </script>
@@ -209,7 +220,7 @@ onUnmounted(() => { cancelGesture?.(); stops.forEach(stop => stop()) })
     </fieldset>
     <button class="island-reset" @click="resetPosition">回到屏幕顶部中央</button>
   </section>
-  <section v-else class="island-shell" :class="{ docked, moving, resizing, shown }" :style="panelStyle"
+  <section v-else class="island-shell" :class="{ docked, moving, resizing }" :style="panelStyle"
     aria-label="SnowDown 灵动岛" @pointerdown="startGesture($event, 'move')" @contextmenu.prevent="openSettings" @dblclick="restore">
     <div class="island-bar">
       <div class="island-leading">
@@ -249,10 +260,8 @@ html.island-page, .island-page body, .island-page #app { margin: 0; width: 100%;
     linear-gradient(155deg, rgb(31 42 62 / var(--island-opacity)), rgb(12 19 32 / var(--island-opacity)));
   border: 1px solid rgb(176 204 255 / calc(var(--island-opacity) * .26));
   box-shadow: inset 0 1px rgb(255 255 255 / calc(var(--island-frost) * .22));
-  opacity: 0; transform: translateY(-4px) scale(.985);
-  transition: border-radius 200ms ease, transform 200ms cubic-bezier(.2,.75,.3,1), opacity 160ms ease, border-color 160ms ease;
+  transition: border-radius 200ms ease, transform 200ms cubic-bezier(.2,.75,.3,1), border-color 160ms ease;
 }
-.island-shell.shown .island-bar { opacity: 1; transform: none; }
 .island-shell.docked .island-bar { border-radius: 0 0 15px 15px; border-top-color: transparent; }
 .island-shell.moving .island-bar { border-radius: 15px; transform: scale(.985); border-color: #a4c9ff91; }
 .island-shell.resizing .island-bar { border-color: #a4c9ff91; }

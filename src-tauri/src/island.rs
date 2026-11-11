@@ -6,12 +6,14 @@ use tauri::{
 };
 
 pub const LABEL: &str = "dynamic-island";
+const DEFAULT_WIDTH: u32 = 710;
+const DEFAULT_HEIGHT: u32 = 42;
 
 pub fn create(app: &AppHandle, state: Arc<crate::AppState>) -> tauri::Result<()> {
     let island =
         WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html?view=island".into()))
             .title("SnowDown 灵动岛")
-            .inner_size(710., 42.)
+            .inner_size(DEFAULT_WIDTH.into(), DEFAULT_HEIGHT.into())
             .decorations(false)
             .transparent(true)
             .shadow(false)
@@ -21,6 +23,10 @@ pub fn create(app: &AppHandle, state: Arc<crate::AppState>) -> tauri::Result<()>
             .visible(false)
             .focused(false)
             .build()?;
+    // Give the window an on-screen position even if its WebView has not finished loading.
+    if let Err(error) = resize_island(island.clone(), DEFAULT_WIDTH, DEFAULT_HEIGHT, None, false) {
+        eprintln!("灵动岛初始位置调整失败：{error}");
+    }
     let main = app.get_webview_window("main").expect("main window");
     std::thread::spawn(move || {
         let mut shown = false;
