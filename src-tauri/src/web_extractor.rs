@@ -65,6 +65,18 @@ fn is_youtube(source: &sites::Source) -> bool {
     })
 }
 
+fn vimeo_player(source: &sites::Source) -> Option<String> {
+    let url = url::Url::parse(&source.url).ok()?;
+    let id = url.path().trim_matches('/');
+    // Unlisted links may carry an access hash in the path or query.
+    (matches!(url.host_str(), Some("vimeo.com" | "www.vimeo.com"))
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && !id.is_empty()
+        && id.bytes().all(|byte| byte.is_ascii_digit()))
+    .then(|| format!("https://player.vimeo.com/video/{id}"))
+}
+
 pub struct Extractor {
     cache: Mutex<HashMap<String, (Instant, VideoInfo, Option<Value>)>>,
     gate: tokio::sync::Semaphore,
@@ -383,6 +395,7 @@ impl Extractor {
         cmd.args(["--dump-single-json", "--skip-download", "--"])
             .arg(&source.url);
         let youtube = is_youtube(source);
+        let vimeo = vimeo_player(source);
         let value = if youtube {
             let mut quick = command(app)?;
             quick
@@ -403,13 +416,31 @@ impl Extractor {
                 Ok(value) if metadata(source, &value).is_ok() => value,
                 _ => inspect_output(cmd, 45).await?,
             }
+        } else if let Some(player) = &vimeo {
+            match inspect_output(cmd, 10).await {
+                Ok(value) if metadata(source, &value).is_ok() => value,
+                _ => {
+                    let mut embed = command(app)?;
+                    embed
+                        .arg("--proxy")
+                        .arg(&proxy.url)
+                        .env("NO_PROXY", "")
+                        .env("no_proxy", "")
+                        .args(["--dump-single-json", "--skip-download", "--"])
+                        .arg(player);
+                    inspect_output(embed, 25).await?
+                }
+            }
         } else {
             inspect_output(cmd, 60).await?
         };
         let info = metadata(source, &value)?;
-        // Keep solved YouTube formats in the short-lived cache. Downloading
-        // immediately after inspection must not repeat player challenges.
-        self.remember(source, info.clone(), youtube.then_some(value));
+        // Reuse the resolved formats so downloads use the same successful entry point.
+        self.remember(
+            source,
+            info.clone(),
+            (youtube || vimeo.is_some()).then_some(value),
+        );
         Ok(info)
     }
 }
@@ -486,6 +517,12 @@ pub async fn run(
         ]);
     }
     let captured = temp.join("browser-media.json");
+    if vimeo_player(&source).is_some()
+        && !captured.is_file()
+        && state.extractor.remembered(&source.url).is_none()
+    {
+        state.extractor.inspect(app, &source).await?;
+    }
     if let Some((_, Some(data))) = state.extractor.remembered(&source.url) {
         tokio::fs::write(
             &captured,
@@ -671,6 +708,25 @@ async fn save_cover(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vimeo_fallback_only_rewrites_plain_video_links() {
+        let source = |url: &str| sites::Source {
+            platform: Platform::Web,
+            url: url.into(),
+        };
+        assert_eq!(
+            vimeo_player(&source("https://vimeo.com/22439234")).as_deref(),
+            Some("https://player.vimeo.com/video/22439234")
+        );
+        for url in [
+            "https://vimeo.com/22439234/access-hash",
+            "https://vimeo.com/22439234?h=access-hash",
+            "https://vimeo.com.evil.test/22439234",
+        ] {
+            assert!(vimeo_player(&source(url)).is_none());
+        }
+    }
     #[test]
     fn metadata_filters_drm_and_keeps_real_qualities() {
         let source = sites::recognize("https://www.youtube.com/watch?v=fixture").unwrap();

@@ -574,7 +574,34 @@ impl Sessions {
             return result;
         }
         self.restore_missing(app, source.platform, || true).await?;
-        let window = open_parser(app, source)?;
+        if source.platform == Platform::Douyin && self.cookie(Platform::Douyin).is_empty() {
+            // The official embed player initializes its own guest session and
+            // requests the same video detail that our WebView already captures.
+            let mut player = url::Url::parse("https://open.douyin.com/player/video").unwrap();
+            player
+                .query_pairs_mut()
+                .append_pair("vid", &sites::video_id(source)?);
+            if let Ok(resolved) = self
+                .read_background_page(app, source, quality, player, Duration::from_secs(12))
+                .await
+            {
+                return Ok(resolved);
+            }
+        }
+        let destination = source.url.parse().map_err(|_| "视频链接无效。")?;
+        self.read_background_page(app, source, quality, destination, Duration::from_secs(18))
+            .await
+    }
+
+    async fn read_background_page(
+        &self,
+        app: &AppHandle,
+        source: &sites::Source,
+        quality: u32,
+        destination: url::Url,
+        timeout: Duration,
+    ) -> Result<sites::Resolved, String> {
+        let window = open_parser(app, source.platform, destination)?;
         struct Stop(tauri::WebviewWindow);
         impl Drop for Stop {
             fn drop(&mut self) {
@@ -582,7 +609,7 @@ impl Sessions {
             }
         }
         let _stop = Stop(window.clone());
-        let result = tokio::time::timeout(Duration::from_secs(18), async {
+        tokio::time::timeout(timeout, async {
             loop {
                 match read_video(app, source, quality).await {
                     Ok(resolved) => return Ok(resolved),
@@ -594,11 +621,7 @@ impl Sessions {
                 }
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
-        }).await.unwrap_or_else(|_| Err(format!("{}暂未返回此链接的视频详情。请确认链接有效；如需登录或验证，请在平台账号中完成后重新解析。", source.platform.label())));
-        // Stop playback and network work once metadata is available; the login
-        // window is never navigated, shown or used as the download source.
-        let _ = window.navigate("about:blank".parse().unwrap());
-        result
+        }).await.unwrap_or_else(|_| Err(format!("{}暂未返回此链接的视频详情。请确认链接有效；如需登录或验证，请在平台账号中完成后重新解析。", source.platform.label())))
     }
 }
 
@@ -640,9 +663,12 @@ pub fn login_window(app: &AppHandle, platform: Platform) -> Result<tauri::Webvie
     Ok(window)
 }
 
-fn open_parser(app: &AppHandle, source: &sites::Source) -> Result<tauri::WebviewWindow, String> {
-    let label = format!("resolver-{}", source.platform.key());
-    let destination = source.url.parse().map_err(|_| "视频链接无效。")?;
+fn open_parser(
+    app: &AppHandle,
+    platform: Platform,
+    destination: url::Url,
+) -> Result<tauri::WebviewWindow, String> {
+    let label = format!("resolver-{}", platform.key());
     if let Some(window) = app.get_webview_window(&label) {
         window
             .navigate(destination)
@@ -654,7 +680,7 @@ fn open_parser(app: &AppHandle, source: &sites::Source) -> Result<tauri::Webview
         .app_data_dir()
         .map_err(|_| "应用数据目录不可用。")?
         .join("official-profiles")
-        .join(source.platform.key());
+        .join(platform.key());
     std::fs::create_dir_all(&directory).map_err(|_| "平台登录目录不可用。")?;
     let window = WebviewWindowBuilder::new(
         app,
