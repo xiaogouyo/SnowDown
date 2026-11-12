@@ -16,7 +16,7 @@ import BrowserExtension from './components/BrowserExtension.vue'
 import AutostartToggle from './components/AutostartToggle.vue'
 import { prepareModeMorph } from './modeMorph'
 import './modeMorph.css'
-import { identifySource, platformLabels, sourceSummary, sourceLabel, supportedSiteCount, supportedSiteNames } from './sources'
+import { identifySource, platformLabels, sourceSummary, sourceLabel, sourcePlatformBadge, supportedSiteCount } from './sources'
 import { bytes, duration, errorMessage, statusLabels } from './format'
 import type { AppSnapshot, BatchOptions, BatchResult, ClipboardCapture, ClipboardSnapshot, DownloadTask, OutputFormat, Settings, VideoInfo, LoginQr, Platform, SourceLink } from './types'
 
@@ -65,6 +65,7 @@ let disposed = false
 let unwatchFocus: (() => void) | undefined
 let checkingClipboard = false
 const detectedSource = computed(() => identifySource(link.value))
+const detectedBadge = computed(() => detectedSource.value && sourcePlatformBadge(detectedSource.value))
 const platformList: Platform[] = ['bilibili', 'douyin', 'xiaohongshu', 'channels']
 const filterOptions = [{ value: 'all', label: '全部状态' }, { value: 'downloading', label: '进行中' }, { value: 'paused', label: '已暂停' }, { value: 'failed', label: '失败' }]
 const connectionOptions = [1, 2, 4, 8, 16].map(value => ({ value, label: `${value} 个连接${value === 8 ? "（推荐）" : ""}` }))
@@ -493,12 +494,22 @@ onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); u
 
       <main class="workspace">
         <section class="page-heading">
-          <div><div class="eyebrow">YOUR CONTENT, YOUR SPACE</div><h1>{{ viewTitle }}<span class="title-dot">.</span></h1><p>{{ view === 'active' ? '留住每一次灵感，让喜欢的内容随时相伴。' : view === 'completed' ? '下载完成的内容，都在这里等你。' : '每一次收藏，都有迹可循。' }}</p></div>
+          <div><h1>{{ viewTitle }}<span class="title-dot">.</span></h1><p>{{ view === 'active' ? '留住每一次灵感，让喜欢的内容随时相伴。' : view === 'completed' ? '下载完成的内容，都在这里等你。' : '每一次收藏，都有迹可循。' }}</p></div>
           <button ref="batchButton" class="button primary new-task" :disabled="analyzing || submitting || !snapshot" @click="openBatch"><Plus :size="17" />批量下载<kbd>Ctrl N</kbd></button>
         </section>
 
         <section class="link-card" aria-label="添加下载">
-          <div class="link-card-label"><div class="platform-list"><span v-for="platform in platformList" :key="platform" :class="['platform-chip', platform, { detected: detectedSource?.platform === platform }]">{{ platformLabels[platform] }}</span><span class="platform-chip" :title="supportedSiteNames">{{ supportedSiteCount }} 平台</span></div><span>从一个链接开始收藏</span><span class="local-badge"><ShieldCheck :size="12" />本地下载</span></div>
+          <div class="link-card-label">
+            <div class="link-card-intro">
+              <Transition name="platform-badge" mode="out-in">
+                <span v-if="detectedBadge" :key="detectedBadge.id" class="platform-badge-slot">
+                  <span class="platform-chip" :style="{ '--platform-hue': detectedBadge.hue }">{{ detectedBadge.label }}</span>
+                </span>
+              </Transition>
+              <span>从一个链接开始收藏</span>
+            </div>
+            <span class="local-badge"><ShieldCheck :size="12" />本地下载</span>
+          </div>
           <form class="link-form" @submit.prevent="analyze">
             <Link2 :size="19" class="link-icon" />
             <input ref="linkInput" v-model="link" aria-label="视频链接" placeholder="粘贴支持平台的视频链接，或完整分享内容…" :disabled="analyzing" spellcheck="false" @paste="onPaste" @input="inputEdited = true" />

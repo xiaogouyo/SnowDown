@@ -3,11 +3,36 @@ import sites from '../shared/platforms.json'
 
 export const platformLabels: Record<Platform, string> = { bilibili: 'B站', douyin: '抖音', xiaohongshu: '小红书', channels: '视频号', web: '网页视频' }
 export const supportedSiteCount = sites.length + 1
-export const supportedSiteNames = ['视频号', ...sites.map(site => site.label)].join('、')
 const matches = (host: string, base: string) => host === base || host.endsWith(`.${base}`)
+function catalogSite(input: string) {
+  try {
+    const host = new URL(input).hostname
+    return sites.find(site => site.hosts.some(base => matches(host, base)))
+  } catch {
+    return undefined
+  }
+}
+
 export function sourceLabel(source: {platform: Platform; url?: string; sourceUrl?: string}): string {
-  if(source.platform !== 'web') return platformLabels[source.platform]
-  try { const host=new URL(source.url||source.sourceUrl||'').hostname;return sites.find(site=>site.hosts.some(base=>matches(host,base)))?.label||platformLabels.web } catch {return platformLabels.web}
+  if (source.platform !== 'web') return platformLabels[source.platform]
+  return catalogSite(source.url || source.sourceUrl || '')?.label ?? platformLabels.web
+}
+
+const platformHues: Record<string, number> = {
+  bilibili: 330, douyin: 252, xiaohongshu: 350, channels: 28,
+  youtube: 4, vimeo: 193, soundcloud: 18, dailymotion: 221,
+  tiktok: 173, instagram: 297, twitter: 215, facebook: 231, reddit: 14,
+}
+
+export function sourcePlatformBadge(source: SourceLink) {
+  const site = source.platform === 'web' ? catalogSite(source.url) : undefined
+  const id = site?.id ?? source.platform
+  const index = site ? sites.indexOf(site) : 0
+  return {
+    id,
+    label: site?.label ?? platformLabels[source.platform],
+    hue: platformHues[id] ?? (210 + index * 137.508) % 360,
+  }
 }
 
 export function identifySource(text: string): SourceLink | null {

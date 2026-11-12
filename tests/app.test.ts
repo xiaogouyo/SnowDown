@@ -51,6 +51,22 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); localStorage.clear(); vi.useRealTimers() })
 
 describe('desktop download flow', () => {
+  it('reveals only the detected platform with its own color and clears the badge with the link', async () => {
+    const intro = wrapper.get('.link-card-intro')
+    const input = wrapper.get('[aria-label="视频链接"]')
+    expect(intro.text()).toBe('从一个链接开始收藏')
+    await input.setValue('https://weixin.qq.com/sph/AVb6IYn3PP')
+    const channels = intro.get('.platform-chip')
+    expect(channels.text()).toBe('视频号')
+    const channelsStyle = channels.attributes('style')
+    expect(intro.text()).toBe('视频号从一个链接开始收藏')
+    await input.setValue('https://www.youtube.com/watch?v=jNQXAC9IVRw')
+    expect(intro.get('.platform-chip').text()).toBe('YouTube')
+    expect(intro.get('.platform-chip').attributes('style')).not.toBe(channelsStyle)
+    await input.setValue('')
+    expect(intro.text()).toBe('从一个链接开始收藏')
+  })
+
   it('saves the dynamic island switch with download preferences', async () => {
     await flushPromises()
     await wrapper.findAll('.nav-item').find(button => button.text() === '设置')!.trigger('click')
