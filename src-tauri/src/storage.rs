@@ -116,6 +116,7 @@ mod tests {
             clipboard_enabled: true,
             clipboard_auto_parse: false,
             dynamic_island_enabled: false,
+            startup_mode: Some(crate::model::StartupMode::Minimal),
             download_dir: "D:\\视频".into(),
             concurrency: 2,
             max_speed_mbps: 0,
@@ -128,11 +129,13 @@ mod tests {
         let restored = store
             .load_settings(Settings {
                 dynamic_island_enabled: true,
+                startup_mode: None,
                 ..settings
             })
             .unwrap();
         assert_eq!(restored.download_dir, "D:\\视频");
         assert!(!restored.dynamic_island_enabled);
+        assert_eq!(restored.startup_mode, Some(crate::model::StartupMode::Minimal));
     }
 
     #[test]

@@ -3,6 +3,8 @@ export type OutputFormat = 'video' | 'audio'
 export type Platform = 'bilibili' | 'douyin' | 'xiaohongshu' | 'channels' | 'web'
 export interface SourceLink { platform: Platform; url: string }
 
+export type StartupMode = 'full' | 'minimal'
+
 export interface Settings {
   downloadDir: string
   concurrency: number
@@ -14,6 +16,7 @@ export interface Settings {
   clipboardEnabled: boolean
   clipboardAutoParse: boolean
   dynamicIslandEnabled: boolean
+  startupMode?: StartupMode | null
 }
 
 export interface VideoPage { cid: number; page: number; part: string; duration: number }

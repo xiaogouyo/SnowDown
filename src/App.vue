@@ -4,7 +4,7 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from
 import {
   ArrowDown, ArrowDownToLine, ArrowUpRight, Check, CheckCheck, ChevronDown, CircleAlert,
   CircleCheck, Clock3, ClipboardPaste, Download, FileText, Film, FolderOpen,
-  HardDrive, Info, Link2, LoaderCircle, Music2, Pause, Play, Plus, RotateCcw,
+  HardDrive, Info, LayoutGrid, Link2, LoaderCircle, Minimize2, Music2, Pause, Play, Plus, RotateCcw,
   Search, Settings2, ShieldCheck, SlidersHorizontal, Snowflake, Trash2, UserRound, X, Minus, Square, Copy, QrCode,
 } from '@lucide/vue'
 import * as api from './api'
@@ -18,14 +18,19 @@ import { prepareModeMorph } from './modeMorph'
 import './modeMorph.css'
 import { identifySource, platformLabels, sourceSummary, sourceLabel, sourcePlatformBadge, supportedSiteCount } from './sources'
 import { bytes, duration, errorMessage, statusLabels } from './format'
-import type { AppSnapshot, BatchOptions, BatchResult, ClipboardCapture, ClipboardSnapshot, DownloadTask, OutputFormat, Settings, VideoInfo, LoginQr, Platform, SourceLink } from './types'
+import type { AppSnapshot, BatchOptions, BatchResult, ClipboardCapture, ClipboardSnapshot, DownloadTask, OutputFormat, Settings, StartupMode, VideoInfo, LoginQr, Platform, SourceLink } from './types'
 
 const snapshot = ref<AppSnapshot | null>(null)
 const view = ref<'active' | 'completed' | 'history'>('active')
 const link = ref('')
 const inputEdited = ref(false)
-function savedMode() { try { return localStorage.getItem('snowdown.interface') === 'minimal' } catch { return false } }
-const simpleMode = ref(savedMode())
+function previousStartupMode(): StartupMode {
+  try { return localStorage.getItem('snowdown.interface') === 'minimal' ? 'minimal' : 'full' }
+  catch { return 'full' }
+}
+const legacyStartupMode = previousStartupMode()
+const simpleMode = ref(legacyStartupMode === 'minimal')
+const startupReady = ref(!api.desktop)
 const simpleExpanded = ref(false)
 const simpleError = ref('')
 const simpleNotice = ref('')
@@ -53,7 +58,7 @@ const updateCenter = ref<InstanceType<typeof UpdateCenter>>()
 const updateOpen = ref(false)
 const extensionOpen = ref(false)
 const settingsTab = ref<'download' | 'account'>('download')
-const settingsDraft = reactive<Settings>({ downloadDir: '', concurrency: 2, downloadConnections: 8, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false, dynamicIslandEnabled: true })
+const settingsDraft = reactive<Settings>({ downloadDir: '', concurrency: 2, downloadConnections: 8, maxSpeedMbps: 0, saveCover: false, saveDanmaku: false, saveSubtitles: false, clipboardEnabled: true, clipboardAutoParse: false, dynamicIslandEnabled: true, startupMode: legacyStartupMode })
 const accountPlatform = ref<Platform>('bilibili')
 const clipboardSuggestion = ref<SourceLink | null>(null)
 const pendingClipboard = ref<ClipboardCapture | null>(null)
@@ -124,7 +129,6 @@ async function toggleSimpleMode(event?: MouseEvent) {
   modeSwitching.value = true
   simpleMode.value = !simpleMode.value
   if (simpleMode.value) { simpleExpanded.value = !!video.value || analyzing.value; if (!simpleTaskIds.value.length) simpleSessionStart = Date.now() }
-  try { localStorage.setItem('snowdown.interface', simpleMode.value ? 'minimal' : 'full') } catch { /* The current session still works without storage. */ }
   try {
     await nextTick()
     await activeMorph?.play(appShell.value?.querySelector<HTMLElement>(simpleMode.value ? '.minimal-mode' : '.standard-mode') ?? null)
@@ -313,7 +317,11 @@ async function bulk(name: 'pause' | 'resume') {
 }
 
 function openSettings(tab: 'download' | 'account' = 'download') {
-  if (snapshot.value) Object.assign(settingsDraft, snapshot.value.settings)
+  if (snapshot.value) {
+    Object.assign(settingsDraft, snapshot.value.settings, {
+      startupMode: snapshot.value.settings.startupMode ?? legacyStartupMode,
+    })
+  }
   settingsTab.value = tab; dialog.value = 'settings'
   if (tab === 'account') accountPlatform.value = detectedSource.value?.platform === 'web' ? 'bilibili' : detectedSource.value?.platform ?? 'bilibili'
 }
@@ -430,6 +438,8 @@ onMounted(async () => {
     const initial = await api.getSnapshot()
     if (disposed) return
     snapshot.value = initial
+    simpleMode.value = (initial.settings.startupMode ?? legacyStartupMode) === 'minimal'
+    startupReady.value = true
     unwatchWindow = await api.watchMaximized(value => { if (!disposed) maximized.value = value })
     if (disposed) { unwatchWindow(); return }
     unwatchClipboard = await api.subscribeClipboard(receiveClipboard)
@@ -439,14 +449,19 @@ onMounted(async () => {
     mainFocused.value = await api.windowFocused()
     if (disposed) return
     if (snapshot.value.settings.clipboardEnabled) await checkClipboard()
-  } catch (error) { if (!disposed) notify(`初始化失败：${errorMessage(error)}`, 'error') }
+  } catch (error) {
+    if (!disposed) {
+      startupReady.value = true
+      notify(`初始化失败：${errorMessage(error)}`, 'error')
+    }
+  }
 })
 
 onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); unsubscribe?.(); unwatchWindow?.(); unwatchFocus?.(); unwatchClipboard?.(); stopLogin(); clearTimeout(toastTimer); clearTimeout(autoParseTimer); document.removeEventListener('keydown', onKey) })
 </script>
 
 <template>
-  <div ref="appShell" :class="['app-shell', { 'mode-switching': modeSwitching }]">
+  <div v-show="startupReady" ref="appShell" :class="['app-shell', { 'mode-switching': modeSwitching }]">
     <div v-show="!simpleMode" class="standard-mode">
     <aside class="sidebar">
       <button class="brand" type="button" @click="toggleSimpleMode" aria-label="切换到简约模式" title="切换到简约模式">
@@ -604,6 +619,14 @@ onUnmounted(() => { disposed = true; parseGeneration++; activeMorph?.cancel(); u
         <div v-if="settingsTab === 'download'" class="settings-content">
           <AutostartToggle />
           <label class="toggle-row"><span><Square :size="17" /><span>灵动岛<small>点击窗口右上角的最小化按钮后，在屏幕顶部显示。保存设置后生效。</small></span></span><input v-model="settingsDraft.dynamicIslandEnabled" type="checkbox" role="switch" aria-label="灵动岛" /></label>
+          <fieldset class="startup-mode">
+            <legend>默认启动模式</legend>
+            <p>下次启动或开机自启后首次打开窗口时生效。</p>
+            <div class="startup-mode-options">
+              <label><input v-model="settingsDraft.startupMode" type="radio" name="startup-mode" value="minimal" /><Minimize2 :size="16" /><span>简约模式</span></label>
+              <label><input v-model="settingsDraft.startupMode" type="radio" name="startup-mode" value="full" /><LayoutGrid :size="16" /><span>全栈模式</span></label>
+            </div>
+          </fieldset>
           <div class="settings-divider"></div>
           <label class="field-label">下载位置</label><div class="folder-field"><FolderOpen :size="17" /><input v-model="settingsDraft.downloadDir" placeholder="选择本地文件夹" aria-label="下载位置" /><button @click="chooseFolder">浏览</button></div>
           <div class="settings-two-col"><div><span class="field-label">同时下载任务数</span><UiSelect :model-value="settingsDraft.concurrency" :options="concurrencyOptions" label="同时下载任务数" @update:model-value="value => settingsDraft.concurrency = Number(value)" /></div><div><span class="field-label">每文件下载连接数</span><UiSelect :model-value="settingsDraft.downloadConnections ?? 8" :options="connectionOptions" label="每文件下载连接数" @update:model-value="value => settingsDraft.downloadConnections = Number(value)" /><small>视频与更新共用；服务器支持时并行分段，继续下载后生效</small></div></div><div class="settings-two-col"><label><span class="field-label">单任务限速（MB/s）</span><input v-model.number="settingsDraft.maxSpeedMbps" type="number" min="0" max="1024" /><small>设为 0 表示不限速</small></label></div>

@@ -802,6 +802,7 @@ pub fn run() {
                     clipboard_enabled: true,
                     clipboard_auto_parse: false,
                     dynamic_island_enabled: true,
+                    startup_mode: None,
                 })
                 .map_err(std::io::Error::other)?;
             let tasks = storage.load_tasks().map_err(std::io::Error::other)?;

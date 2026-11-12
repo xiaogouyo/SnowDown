@@ -56,6 +56,13 @@ fn default_connections() -> usize {
     8
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StartupMode {
+    Full,
+    Minimal,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -73,6 +80,8 @@ pub struct Settings {
     pub clipboard_auto_parse: bool,
     #[serde(default = "enabled")]
     pub dynamic_island_enabled: bool,
+    #[serde(default)]
+    pub startup_mode: Option<StartupMode>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -271,6 +280,7 @@ mod tests {
         assert!(settings.dynamic_island_enabled);
         assert!(!settings.clipboard_auto_parse);
         assert_eq!(settings.download_connections, 8);
+        assert_eq!(settings.startup_mode, None);
         let video: VideoInfo = serde_json::from_value(serde_json::json!({"bvid":"BV1xx411c7mD","title":"legacy","cover":"","author":"","duration":1,"pages":[],"qualities":[],"selectedCid":1})).unwrap();
         assert_eq!(video.platform, Platform::Bilibili);
         assert!(video.source_url.is_empty());
