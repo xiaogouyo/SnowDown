@@ -827,7 +827,7 @@ pub fn run() {
                 extractor: web_extractor::Extractor::default(),
             });
             app.manage(state.clone());
-            notifications::prepare(&handle, &data_dir);
+            notifications::prepare(&handle);
             tray_menu::create(&handle)?;
             if let Err(error) = island::create(&handle, state.clone()) {
                 eprintln!("灵动岛初始化失败：{error}");
