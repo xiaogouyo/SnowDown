@@ -8,6 +8,9 @@ use std::{
 };
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
+const DOUYIN_VERIFICATION: &str =
+    "平台安全验证：抖音暂未向访客提供此视频的数据，请稍后重试。";
+
 fn cached_quality(item: &sites::Resolved, quality: u32) -> bool {
     item.quality == quality
         || (quality == 0 && item.info.qualities.iter().map(|q| q.id).max() == Some(item.quality))
@@ -573,24 +576,31 @@ impl Sessions {
         if let Some(result) = self.observed_video(source, quality) {
             return result;
         }
-        self.restore_missing(app, source.platform, || true).await?;
-        if source.platform == Platform::Douyin && self.cookie(Platform::Douyin).is_empty() {
+        let mut verification_required = false;
+        if source.platform == Platform::Douyin {
             // The official embed player initializes its own guest session and
             // requests the same video detail that our WebView already captures.
             let mut player = url::Url::parse("https://open.douyin.com/player/video").unwrap();
             player
                 .query_pairs_mut()
                 .append_pair("vid", &sites::video_id(source)?);
-            if let Ok(resolved) = self
+            match self
                 .read_background_page(app, source, quality, player, Duration::from_secs(12))
                 .await
             {
-                return Ok(resolved);
+                Ok(resolved) => return Ok(resolved),
+                Err(error) => verification_required = error == DOUYIN_VERIFICATION,
             }
         }
+        self.restore_missing(app, source.platform, || true).await?;
         let destination = source.url.parse().map_err(|_| "视频链接无效。")?;
-        self.read_background_page(app, source, quality, destination, Duration::from_secs(18))
-            .await
+        let result = self
+            .read_background_page(app, source, quality, destination, Duration::from_secs(18))
+            .await;
+        if verification_required && result.is_err() {
+            return Err(DOUYIN_VERIFICATION.into());
+        }
+        result
     }
 
     async fn read_background_page(
@@ -763,9 +773,17 @@ async fn read_video_inner(
     let window = app
         .get_webview_window(&format!("resolver-{}", source.platform.key()))
         .ok_or("后台解析组件未启动。")?;
-    let current = sites::recognize(window.url().map_err(|_| "无法读取官方页面。")?.as_str())?;
-    if current.platform != source.platform || sites::video_id(&current)? != sites::video_id(source)?
-    {
+    let current_url = window.url().map_err(|_| "无法读取官方页面。")?;
+    let current = sites::recognize(current_url.as_str()).ok();
+    let matches_video = current.as_ref().is_some_and(|current| {
+        current.platform == source.platform && sites::video_id(current) == sites::video_id(source)
+    });
+    let douyin_page = source.platform == Platform::Douyin
+        && current_url.scheme() == "https"
+        && current_url.host_str().is_some_and(|host| {
+            sites::host_matches(host, "douyin.com") || sites::host_matches(host, "iesdouyin.com")
+        });
+    if !matches_video && !douyin_page {
         return Err("后台页面尚未加载输入链接对应的视频。".into());
     }
     let script = include_str!("site_video.js")
@@ -802,11 +820,18 @@ async fn read_video_inner(
     if let Some(value) = data.as_str() {
         data = serde_json::from_str(value).map_err(|_| "网页视频数据无效。")?;
     }
-    let result = if data["verificationRequired"].as_bool() == Some(true) {
-        Err("平台安全验证：抖音返回了验证码页面，尚未提供视频数据。可在浏览器官方页面完成验证后，通过 SnowDown 插件读取并转发下载；或在平台账号中重新扫码后重试。".into())
-    } else {
+    let result = if matches_video {
         sites::from_browser(source, &data, quality)
+    } else {
+        Err("后台页面尚未加载输入链接对应的视频。".into())
     };
+    let result = result.map_err(|error| {
+        if douyin_page && data["verificationRequired"].as_bool() == Some(true) {
+            DOUYIN_VERIFICATION.into()
+        } else {
+            error
+        }
+    });
     if let Some(path) = diagnostics_path() {
         // Opt-in developer diagnostics: shape and hostnames only. Never record
         // credentials, query parameters, page bodies, titles, or media URLs.

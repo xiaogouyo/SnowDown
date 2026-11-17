@@ -11,7 +11,8 @@
     video: { media: { stream: note.video?.media?.stream } }
   } } } } };
   let detail;
-  try { const page = capturePage(); detail = page.detail?.aweme_detail; result.verificationRequired = page.verificationRequired; }
+  result.verificationRequired = /验证码中间页|安全验证|security verification/i.test(document.title);
+  try { const page = capturePage(); detail = page.detail?.aweme_detail; result.verificationRequired ||= page.verificationRequired; }
   catch(error) { result.readerError = error.name; }
   result.captureStatus = { readyState: document.readyState, captured: window.__snowdownMediaDetails?.length || 0,
     hookInstalled: !!window.__snowdownCaptureInstalled, routerPresent: !!window._ROUTER_DATA,

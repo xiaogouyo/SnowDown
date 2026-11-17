@@ -204,13 +204,26 @@ fn client(platform: Platform, cookie: &str) -> Result<Client, String> {
         .map_err(|_| "网络组件初始化失败。".into())
 }
 
-async fn page(client: &Client, source: &Source) -> Result<(String, Url), String> {
+async fn page(
+    client: &Client,
+    source: &Source,
+    stop_at_douyin_video: bool,
+) -> Result<(String, Url), String> {
     let mut current = Url::parse(&source.url).map_err(|_| "视频链接无效。")?;
     for _ in 0..6 {
         if current.scheme() != "https"
+            || !current.username().is_empty()
+            || current.password().is_some()
+            || current.port().is_some()
             || source_host(current.host_str().unwrap_or_default()) != Some(source.platform)
         {
             return Err("分享链接跳转到了非所属平台，已停止解析。".into());
+        }
+        if stop_at_douyin_video
+            && current.host_str() != Some("v.douyin.com")
+            && recognize(current.as_str()).is_ok()
+        {
+            return Ok((String::new(), current));
         }
         let response = client
             .get(current.clone())
@@ -246,8 +259,10 @@ pub async fn canonical_source(source: &Source, cookie: &str) -> Result<Source, S
     if !source.url.contains("v.douyin.com/") && !source.url.contains("xhslink.com/") {
         return Ok(source.clone());
     }
-    let http = client(source.platform, cookie)?;
-    let (_, final_url) = page(&http, source).await?;
+    let douyin = source.platform == Platform::Douyin;
+    // A Douyin short link only needs to disclose its public video ID.
+    let http = client(source.platform, if douyin { "" } else { cookie })?;
+    let (_, final_url) = page(&http, source, douyin).await?;
     if final_url.path().contains("login") {
         return Err("平台要求登录，请先在设置 → 平台账号中打开官方页面并保存会话。".into());
     }
@@ -282,7 +297,7 @@ pub async fn resolve(source: &Source, quality: u32, cookie: &str) -> Result<Reso
             parse_douyin(&data, &id)?
         }
         Platform::Xiaohongshu => {
-            let (html, final_url) = page(&http, &canonical).await?;
+            let (html, final_url) = page(&http, &canonical, false).await?;
             if final_url.path().contains("login") {
                 return Err("小红书要求登录，请在设置 → 平台账号中打开小红书官方页面，登录后导入会话再解析。".into());
             }
